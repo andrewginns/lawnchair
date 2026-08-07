@@ -8,6 +8,7 @@ import app.lawnchair.LawnchairLauncher
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.preferences2.PreferenceManager2
 import com.android.launcher3.AbstractFloatingView
+import com.android.launcher3.IconGestureTouchTracker
 import com.android.launcher3.LauncherState
 import com.android.launcher3.Utilities
 import com.android.launcher3.touch.BothAxesSwipeDetector
@@ -39,6 +40,7 @@ class VerticalSwipeTouchController(
     private var pointerCount = 0
     private var maxPointerCount = 0
     private var triggered = false
+    private val iconGestureTouchTracker = IconGestureTouchTracker(launcher)
 
     // LC: a touch that starts on a paged dock belongs to the pager while it is mostly horizontal.
     private val touchSlop = ViewConfiguration.get(launcher).scaledTouchSlop
@@ -66,6 +68,7 @@ class VerticalSwipeTouchController(
 
     override fun onControllerInterceptTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            iconGestureTouchTracker.onTouchDown(ev)
             noIntercept = !canInterceptTouch(ev)
             if (noIntercept) {
                 return false
@@ -86,8 +89,15 @@ class VerticalSwipeTouchController(
         maxPointerCount = maxOf(maxPointerCount, pointerCount)
         val effectivePointerCount = if (maxPointerCount >= 2) 2 else pointerCount
         detector.setDetectableScrollConditions(getSwipeDirection(effectivePointerCount), false)
+        if (iconGestureTouchTracker.isMovingTowardConfiguredIconGesture(ev)) {
+            return false
+        }
         onControllerTouchEvent(ev)
-        return detector.isDraggingOrSettling
+        val intercept = detector.isDraggingOrSettling
+        if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) {
+            iconGestureTouchTracker.reset()
+        }
+        return intercept
     }
 
     override fun onControllerTouchEvent(ev: MotionEvent): Boolean {
@@ -104,15 +114,6 @@ class VerticalSwipeTouchController(
 
     private fun canInterceptTouch(ev: MotionEvent): Boolean {
         if ((ev.edgeFlags and Utilities.EDGE_NAV_BAR) != 0) {
-            return false
-        }
-        // LC: Icon Swipe Gestures (For vertical gestures)
-        val isIconSwipe = launcher.workspace?.let {
-            val coord = floatArrayOf(ev.x, ev.y)
-            launcher.dragLayer.mapCoordInSelfToDescendant(it, coord)
-            it.isTouchOnIconWithSwipeGesture(coord[0], coord[1], true)
-        } ?: false
-        if (isIconSwipe) {
             return false
         }
         return AbstractFloatingView.getTopOpenView(launcher) == null &&
