@@ -116,6 +116,7 @@ public class Hotseat extends FrameLayout implements Insettable {
     private final int mPageIndicatorHeight;
 
     private final ActivityContext mActivity;
+    private final IconGestureTouchTracker mIconGestureTouchTracker;
 
     PreferenceManager2 preferenceManager2;
     PreferenceManager preferenceManager;
@@ -131,6 +132,7 @@ public class Hotseat extends FrameLayout implements Insettable {
     public Hotseat(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
         mActivity = ActivityContext.lookupContext(context);
+        mIconGestureTouchTracker = new IconGestureTouchTracker(context);
 
         preferenceManager2 = PreferenceManager2.getInstance(context);
         preferenceManager = PreferenceManager.getInstance(context);
@@ -435,34 +437,46 @@ public class Hotseat extends FrameLayout implements Insettable {
         }
     }
 
-    private boolean isTouchOnQsb(MotionEvent ev) {
+    private boolean isTouchOnQsb(float x, float y) {
         if (mQsb == null || mQsb.getVisibility() != VISIBLE) {
             return false;
         }
-        float x = ev.getX();
-        float y = ev.getY();
         return x >= mQsb.getLeft() && x < mQsb.getRight()
                 && y >= mQsb.getTop() && y < mQsb.getBottom();
     }
 
+    BubbleTextView findIconAtPosition(float x, float y) {
+        if (isTouchOnQsb(x, y)) {
+            return null;
+        }
+        float[] coord = {x, y};
+        Utilities.mapCoordInSelfToDescendant(mPagedView, this, coord);
+        return mPagedView.findIconAtPosition(coord[0] - mPagedView.getScrollX(),
+                coord[1] - mPagedView.getScrollY());
+    }
+
     private MotionEvent obtainPagerEvent(MotionEvent ev) {
         MotionEvent pagerEv = MotionEvent.obtain(ev);
-        pagerEv.offsetLocation(-mIconsContainer.getLeft() - mPagedView.getLeft(),
-                -mIconsContainer.getTop() - mPagedView.getTop());
+        pagerEv.offsetLocation(-mIconsContainer.getX() - mPagedView.getX(),
+                -mIconsContainer.getY() - mPagedView.getY());
         return pagerEv;
     }
 
     @Override
     public boolean onInterceptTouchEvent(MotionEvent ev) {
+        int action = ev.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP
+                || action == MotionEvent.ACTION_CANCEL) {
+            mIconGestureTouchTracker.reset();
+        }
         int yThreshold = getMeasuredHeight() - getPaddingBottom();
-        if (ev.getY() > yThreshold || isTouchOnQsb(ev)) {
+        if (ev.getY() > yThreshold || isTouchOnQsb(ev.getX(), ev.getY())) {
             return false;
         }
 
         // Multi-page dock: own the icon-band stream and dispatch it to the pager so empty
         // pages can still scroll (same pattern as single-page workspace forwarding).
         if (mPagedView.isPagingEnabled()) {
-            final int action = ev.getAction() & MotionEvent.ACTION_MASK;
             if (action == MotionEvent.ACTION_DOWN) {
                 mSendTouchToPager = true;
                 mSendTouchToWorkspace = false;
@@ -472,7 +486,12 @@ public class Hotseat extends FrameLayout implements Insettable {
 
         // Single-page dock: forward horizontal swipes to workspace.
         if (mWorkspace != null) {
-            mSendTouchToWorkspace = mWorkspace.onInterceptTouchEvent(ev);
+            if (action == MotionEvent.ACTION_DOWN) {
+                mIconGestureTouchTracker.onTouchDown(ev, findIconAtPosition(ev.getX(), ev.getY()));
+            } else if (mIconGestureTouchTracker.isMovingTowardConfiguredIconGesture(ev)) {
+                return false;
+            }
+            mSendTouchToWorkspace = mWorkspace.onInterceptTouchEventFromHotseat(ev);
             return mSendTouchToWorkspace;
         }
         return false;

@@ -17,8 +17,8 @@ package com.android.launcher3;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyFloat;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,21 +34,14 @@ import com.android.launcher3.dragndrop.DragLayer;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** Tests pointer tracking for directional icon gestures. */
+/** Tests routing for directional icon gestures. */
 @RunWith(AndroidJUnit4.class)
 public class IconGestureTouchTrackerTest {
 
     @Test
     public void originalPointerLifted_doesNotHandleRemainingPointerMove() {
-        Launcher launcher = mock(Launcher.class);
-        Workspace<?> workspace = mock(Workspace.class);
-        DragLayer dragLayer = mock(DragLayer.class);
-        when(launcher.getWorkspace()).thenReturn(workspace);
-        when(launcher.getDragLayer()).thenReturn(dragLayer);
-        when(workspace.isTouchOnIconWithSwipeGesture(anyFloat(), anyFloat(), eq(true)))
-                .thenReturn(true);
-
-        IconGestureTouchTracker tracker = new IconGestureTouchTracker(launcher);
+        BubbleTextView icon = mock(BubbleTextView.class);
+        IconGestureTouchTracker tracker = new IconGestureTouchTracker(8);
         MotionEvent down = motionEvent(MotionEvent.ACTION_DOWN, new int[]{0},
                 new float[]{10}, new float[]{10});
         MotionEvent pointerDown = motionEvent(
@@ -60,7 +53,7 @@ public class IconGestureTouchTrackerTest {
                 new float[]{20}, new float[]{40});
 
         try {
-            tracker.onTouchDown(down);
+            tracker.onTouchDown(down, icon);
 
             // Pointer 1 joins, then the original pointer 0 lifts before pointer 1 moves.
             assertEquals(0, pointerDown.getPointerId(0));
@@ -68,13 +61,48 @@ public class IconGestureTouchTrackerTest {
             assertEquals(-1, move.findPointerIndex(down.getPointerId(0)));
 
             assertFalse(tracker.isMovingTowardConfiguredIconGesture(move));
-            verify(workspace, never()).isTouchOnIconWithSwipeGestureInDirection(
-                    anyFloat(), anyFloat(), anyFloat(), anyFloat());
+            verify(icon, never()).hasConfiguredIconSwipeGestureForDirection(anyFloat(), anyFloat());
         } finally {
             down.recycle();
             pointerDown.recycle();
             pointerUp.recycle();
             move.recycle();
+        }
+    }
+
+    @Test
+    public void dockIcon_onlyConfiguredDirectionClaimsSwipeAfterTouchSlop() {
+        Launcher launcher = mock(Launcher.class);
+        Hotseat hotseat = mock(Hotseat.class);
+        BubbleTextView icon = mock(BubbleTextView.class);
+        when(launcher.getDragLayer()).thenReturn(mock(DragLayer.class));
+        when(launcher.getHotseat()).thenReturn(hotseat);
+        when(hotseat.isShown()).thenReturn(true);
+        when(hotseat.findIconAtPosition(10f, 10f)).thenReturn(icon);
+        when(icon.hasConfiguredIconSwipeGestureForDirection(0f, 8f)).thenReturn(true);
+        when(icon.hasConfiguredIconSwipeGestureForDirection(0f, 1f)).thenReturn(true);
+
+        IconGestureTouchTracker tracker = new IconGestureTouchTracker(8);
+        MotionEvent down = motionEvent(MotionEvent.ACTION_DOWN, new int[]{0},
+                new float[]{10}, new float[]{10});
+        MotionEvent jitter = motionEvent(MotionEvent.ACTION_MOVE, new int[]{0},
+                new float[]{10}, new float[]{11});
+        MotionEvent swipeUp = motionEvent(MotionEvent.ACTION_MOVE, new int[]{0},
+                new float[]{10}, new float[]{2});
+        MotionEvent swipeDown = motionEvent(MotionEvent.ACTION_MOVE, new int[]{0},
+                new float[]{10}, new float[]{18});
+        try {
+            tracker.onDragLayerTouchDown(down, launcher);
+            assertFalse(tracker.isMovingTowardConfiguredIconGesture(jitter));
+            assertFalse(tracker.isMovingTowardConfiguredIconGesture(swipeUp));
+            assertTrue(tracker.isMovingTowardConfiguredIconGesture(swipeDown));
+            tracker.reset();
+            assertFalse(tracker.isMovingTowardConfiguredIconGesture(swipeDown));
+        } finally {
+            down.recycle();
+            jitter.recycle();
+            swipeUp.recycle();
+            swipeDown.recycle();
         }
     }
 

@@ -5,10 +5,13 @@ import android.util.AttributeSet
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.ViewGroup
+import com.android.launcher3.BubbleTextView
 import com.android.launcher3.CellLayout
 import com.android.launcher3.DeviceProfile
+import com.android.launcher3.IconGestureTouchTracker
 import com.android.launcher3.PagedView
 import com.android.launcher3.R
+import com.android.launcher3.Utilities
 import com.android.launcher3.Workspace
 import com.android.launcher3.pageindicators.PageIndicatorDots
 
@@ -32,6 +35,7 @@ class HotseatPagedView @JvmOverloads constructor(
         }
 
     private var onDockPageChangeListener: OnDockPageChangeListener? = null
+    private val iconGestureTouchTracker = IconGestureTouchTracker(context)
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -112,7 +116,17 @@ class HotseatPagedView @JvmOverloads constructor(
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         if (!isPagingEnabled) return false
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> iconGestureTouchTracker.onTouchDown(ev, findIconAtPosition(ev.x, ev.y))
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> iconGestureTouchTracker.reset()
+        }
         return super.onInterceptTouchEvent(ev)
+    }
+
+    override fun determineScrollingStart(ev: MotionEvent) {
+        if (!iconGestureTouchTracker.isMovingTowardConfiguredIconGesture(ev)) {
+            super.determineScrollingStart(ev)
+        }
     }
 
     override fun onTouchEvent(ev: MotionEvent): Boolean {
@@ -132,5 +146,14 @@ class HotseatPagedView @JvmOverloads constructor(
         }
         val page = raw.coerceIn(0, childCount - 1)
         return getPageAt(page)
+    }
+
+    fun findIconAtPosition(x: Float, y: Float): BubbleTextView? {
+        if (!Utilities.pointInView(this, x, y, 0f)) return null
+        val page = findPageAtLocalX(x) ?: return null
+        val pageX = x + scrollX - page.left
+        val pageY = y + scrollY - page.top
+        if (!Utilities.pointInView(page, pageX, pageY, 0f)) return null
+        return Workspace.findIconInCellLayout(page, pageX, pageY)
     }
 }

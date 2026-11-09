@@ -202,7 +202,7 @@ public class PortraitStatesTouchController extends AbstractStateChangeTouchContr
     public boolean onControllerInterceptTouchEvent(MotionEvent ev) {
         switch (ev.getAction()) {
             case MotionEvent.ACTION_DOWN:
-                mIconGestureTouchTracker.onTouchDown(ev);
+                mIconGestureTouchTracker.onDragLayerTouchDown(ev, mLauncher);
                 InteractionJankMonitorWrapper.begin(
                         mLauncher.getRootView(), Cuj.CUJ_LAUNCHER_OPEN_ALL_APPS, /*tag=*/ "swipe");
                 InteractionJankMonitorWrapper.begin(

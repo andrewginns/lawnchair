@@ -219,7 +219,7 @@ public class FolderPagedView extends PagedView<PageIndicatorDots> implements Cli
     private boolean isMovingTowardConfiguredHorizontalIconGesture(MotionEvent ev) {
         float diffX = ev.getX() - mIconSwipeDownX;
         float diffY = ev.getY() - mIconSwipeDownY;
-        if (Math.abs(diffX) <= Math.abs(diffY)) {
+        if (Math.abs(diffX) <= mTouchSlop || Math.abs(diffX) <= Math.abs(diffY)) {
             return false;
         }
         BubbleTextView touchedIcon = findIconAtPosition(mIconSwipeDownX, mIconSwipeDownY);

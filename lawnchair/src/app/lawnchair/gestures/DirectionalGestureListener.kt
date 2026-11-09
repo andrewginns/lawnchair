@@ -33,7 +33,8 @@ abstract class DirectionalGestureListener(ctx: Context?) : OnTouchListener {
 
     inner class GestureListener : SimpleOnGestureListener() {
 
-        private fun shouldReactToSwipe(diff: Float, velocity: Float): Boolean = abs(diff) > SWIPE_THRESHOLD && abs(velocity) > SWIPE_VELOCITY_THRESHOLD
+        private fun shouldReactToSwipe(diff: Float, velocity: Float, distanceThreshold: Int = SWIPE_THRESHOLD): Boolean =
+            abs(diff) > distanceThreshold && abs(velocity) > SWIPE_VELOCITY_THRESHOLD
 
         override fun onScroll(
             e1: MotionEvent?,
@@ -59,12 +60,15 @@ abstract class DirectionalGestureListener(ctx: Context?) : OnTouchListener {
         ): Boolean {
             val diffY = e2.y - (e1?.y ?: 0f)
             val diffX = e2.x - (e1?.x ?: 0f)
+            val verticalThreshold = if (diffY > 0 && diffY >= abs(diffX)) swipeDownDistanceThreshold else SWIPE_THRESHOLD
+            val verticalSwipe = shouldReactToSwipe(diffY, velocityY, verticalThreshold)
+            val horizontalSwipe = shouldReactToSwipe(diffX, velocityX)
 
-            Log.d("GESTURE_DETECTION", "onFling: y " + shouldReactToSwipe(diffY, velocityY))
-            Log.d("GESTURE_DETECTION", "onFling: X " + shouldReactToSwipe(diffX, velocityX))
+            Log.d("GESTURE_DETECTION", "onFling: y $verticalSwipe")
+            Log.d("GESTURE_DETECTION", "onFling: X $horizontalSwipe")
 
             handledGesture = when {
-                shouldReactToSwipe(diffY, velocityY) -> {
+                verticalSwipe -> {
                     if (diffY < 0) {
                         Log.d("GESTURE_DETECTION", "Swipe Up Detected")
                         onSwipeTop(velocityY)
@@ -74,7 +78,7 @@ abstract class DirectionalGestureListener(ctx: Context?) : OnTouchListener {
                     }
                 }
 
-                shouldReactToSwipe(diffX, velocityX) -> {
+                horizontalSwipe -> {
                     if (diffX > 0) {
                         Log.d("GESTURE_DETECTION", "Swipe Right Detected")
                         onSwipeRight(velocityX)
@@ -94,6 +98,8 @@ abstract class DirectionalGestureListener(ctx: Context?) : OnTouchListener {
     abstract fun onSwipeLeft(velocity: Float): Boolean
     abstract fun onSwipeTop(velocity: Float): Boolean
     abstract fun onSwipeDown(velocity: Float): Boolean
+
+    protected open val swipeDownDistanceThreshold: Int get() = SWIPE_THRESHOLD
 
     open fun onScroll(diffX: Float, diffY: Float) {}
     open fun onActionUp(handled: Boolean) {}

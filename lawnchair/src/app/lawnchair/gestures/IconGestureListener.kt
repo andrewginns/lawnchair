@@ -12,6 +12,7 @@ import app.lawnchair.gestures.type.GestureType
 import app.lawnchair.launcher
 import app.lawnchair.preferences2.PreferenceManager2
 import com.android.launcher3.BubbleTextView
+import com.android.launcher3.model.data.ItemInfo
 import com.android.launcher3.util.ComponentKey
 import com.android.launcher3.util.MSDLPlayerWrapper
 import com.android.launcher3.util.VibratorWrapper
@@ -28,6 +29,9 @@ class IconGestureListener(
     private val context get() = view.context
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    // Compact docks may have less than the normal swipe distance below the icon.
+    override val swipeDownDistanceThreshold: Int
+        get() = if ((view.tag as? ItemInfo)?.isInHotseat == true) 2 * touchSlop else super.swipeDownDistanceThreshold
     private var scrollLock = ScrollLock.NONE
     private var isAnimating = false
     private var cachedPreferences: Preferences? = null

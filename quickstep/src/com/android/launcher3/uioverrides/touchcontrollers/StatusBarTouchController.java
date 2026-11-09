@@ -149,8 +149,8 @@ public class StatusBarTouchController implements TouchController {
         int idx = ev.getActionIndex();
         int pid = ev.getPointerId(idx);
         if (action == ACTION_DOWN) {
-            if (mIconGestureTouchTracker != null) {
-                mIconGestureTouchTracker.onTouchDown(ev);
+            if (mIconGestureTouchTracker != null && mLauncher instanceof Launcher launcher) {
+                mIconGestureTouchTracker.onDragLayerTouchDown(ev, launcher);
             }
             mCanIntercept = canInterceptTouch(ev);
             if (!mCanIntercept) {

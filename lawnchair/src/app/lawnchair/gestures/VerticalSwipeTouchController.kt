@@ -68,7 +68,7 @@ class VerticalSwipeTouchController(
 
     override fun onControllerInterceptTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            iconGestureTouchTracker.onTouchDown(ev)
+            iconGestureTouchTracker.onDragLayerTouchDown(ev, launcher)
             noIntercept = !canInterceptTouch(ev)
             if (noIntercept) {
                 return false

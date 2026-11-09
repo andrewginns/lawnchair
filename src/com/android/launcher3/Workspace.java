@@ -1213,6 +1213,11 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (shouldSkipPagedViewInterceptionForIconSwipe(ev)) {
             return false;
         } // Lawnchair: Icon swipe gesture feature
+        return onInterceptTouchEventFromHotseat(ev);
+    }
+
+    // Hotseat already checked icon gestures in its own coordinate space.
+    boolean onInterceptTouchEventFromHotseat(MotionEvent ev) {
         if (isTrackpadMultiFingerSwipe(ev)) {
             return false;
         }
@@ -1259,7 +1264,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     private boolean isMovingTowardConfiguredHorizontalIconGesture(MotionEvent ev) {
         float diffX = ev.getX() - mIconSwipeDownX;
         float diffY = ev.getY() - mIconSwipeDownY;
-        if (Math.abs(diffX) <= Math.abs(diffY)) {
+        if (Math.abs(diffX) <= mTouchSlop || Math.abs(diffX) <= Math.abs(diffY)) {
             return false;
         }
         return isTouchOnIconWithSwipeGestureInDirection(
@@ -1294,7 +1299,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     // Lawnchair: Icon swipe gesture feature
-    private BubbleTextView findIconAtPosition(float x, float y) {
+    BubbleTextView findIconAtPosition(float x, float y) {
         for (int i = getChildCount() - 1; i >= 0; i--) {
             View child = getChildAt(i);
             if (!(child instanceof CellLayout cellLayout)) {
@@ -1314,7 +1319,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     // Lawnchair: Icon swipe gesture feature
-    private BubbleTextView findIconInCellLayout(CellLayout cellLayout, float x, float y) {
+    public static BubbleTextView findIconInCellLayout(CellLayout cellLayout, float x, float y) {
         ShortcutAndWidgetContainer container = cellLayout.getShortcutsAndWidgets();
         float containerX = x - container.getLeft();
         float containerY = y - container.getTop();
@@ -1324,10 +1329,10 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                     || child.getVisibility() != VISIBLE) {
                 continue;
             }
-            if (Utilities.pointInView(child,
-                    containerX - child.getLeft(),
-                    containerY - child.getTop(),
-                    0)) {
+            float childX = containerX - child.getX();
+            float childY = containerY - child.getY();
+            if (Utilities.pointInView(child, childX, childY, 0)
+                    && !bubbleTextView.shouldIgnoreTouchDown(childX, childY)) {
                 return bubbleTextView;
             }
         }

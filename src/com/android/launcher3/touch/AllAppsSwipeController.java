@@ -40,6 +40,7 @@ import android.view.animation.Interpolator;
 import com.android.app.animation.Interpolators;
 import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.Flags;
+import com.android.launcher3.IconGestureTouchTracker;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherState;
 import com.android.launcher3.states.StateAnimationConfig;
@@ -48,6 +49,8 @@ import com.android.launcher3.states.StateAnimationConfig;
  * TouchController to switch between NORMAL and ALL_APPS state.
  */
 public class AllAppsSwipeController extends AbstractStateChangeTouchController {
+
+    private final IconGestureTouchTracker mIconGestureTouchTracker;
 
     private static final float ALL_APPS_CONTENT_FADE_MAX_CLAMPING_THRESHOLD = 0.8f;
     private static final float ALL_APPS_CONTENT_FADE_MIN_CLAMPING_THRESHOLD = 0.5f;
@@ -140,6 +143,18 @@ public class AllAppsSwipeController extends AbstractStateChangeTouchController {
 
     public AllAppsSwipeController(Launcher l) {
         super(l, SingleAxisSwipeDetector.VERTICAL);
+        mIconGestureTouchTracker = new IconGestureTouchTracker(l);
+    }
+
+    @Override
+    public boolean onControllerInterceptTouchEvent(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN -> mIconGestureTouchTracker.onDragLayerTouchDown(ev,
+                    mLauncher);
+            case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> mIconGestureTouchTracker.reset();
+        }
+        return !mIconGestureTouchTracker.isMovingTowardConfiguredIconGesture(ev)
+                && super.onControllerInterceptTouchEvent(ev);
     }
 
     @Override

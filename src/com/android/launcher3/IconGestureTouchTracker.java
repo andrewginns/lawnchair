@@ -15,7 +15,9 @@
  */
 package com.android.launcher3;
 
+import android.content.Context;
 import android.view.MotionEvent;
+import android.view.ViewConfiguration;
 
 /**
  * Tracks a touch that starts on an icon and determines whether its current direction has an icon
@@ -23,43 +25,52 @@ import android.view.MotionEvent;
  */
 public final class IconGestureTouchTracker {
 
-    private final Launcher mLauncher;
-    private Workspace mWorkspace;
-    private boolean mStartedOnIconWithGesture;
+    private final int mTouchSlop;
+    private BubbleTextView mTouchedIcon;
     private int mInitialPointerId = MotionEvent.INVALID_POINTER_ID;
     private float mDownX;
     private float mDownY;
-    private float mWorkspaceDownX;
-    private float mWorkspaceDownY;
 
-    /** Creates a tracker for touch events dispatched through {@code launcher}'s drag layer. */
-    public IconGestureTouchTracker(Launcher launcher) {
-        mLauncher = launcher;
+    public IconGestureTouchTracker(Context context) {
+        this(ViewConfiguration.get(context).getScaledTouchSlop());
     }
 
-    /** Records the icon, if any, where this touch began. */
-    public void onTouchDown(MotionEvent ev) {
-        mStartedOnIconWithGesture = false;
-        mInitialPointerId = ev.getPointerId(0);
-        mWorkspace = mLauncher.getWorkspace();
-        if (mWorkspace == null || mLauncher.getDragLayer() == null) {
-            return;
-        }
+    IconGestureTouchTracker(int touchSlop) {
+        mTouchSlop = touchSlop;
+    }
 
-        float[] coord = new float[]{ev.getX(), ev.getY()};
-        mLauncher.getDragLayer().mapCoordInSelfToDescendant(mWorkspace, coord);
+    /** Finds the touched icon for an event in drag-layer coordinates. */
+    public void onDragLayerTouchDown(MotionEvent ev, Launcher launcher) {
+        BubbleTextView icon = null;
+        if (launcher.getDragLayer() != null) {
+            float[] coord = new float[]{ev.getX(), ev.getY()};
+            Hotseat hotseat = launcher.getHotseat();
+            if (hotseat != null && hotseat.isShown()) {
+                launcher.getDragLayer().mapCoordInSelfToDescendant(hotseat, coord);
+                icon = hotseat.findIconAtPosition(coord[0], coord[1]);
+            }
+            Workspace<?> workspace = launcher.getWorkspace();
+            if (icon == null && workspace != null) {
+                coord[0] = ev.getX();
+                coord[1] = ev.getY();
+                launcher.getDragLayer().mapCoordInSelfToDescendant(workspace, coord);
+                icon = workspace.findIconAtPosition(coord[0], coord[1]);
+            }
+        }
+        onTouchDown(ev, icon);
+    }
+
+    /** Records the touched icon when the caller already has local hit-test coordinates. */
+    public void onTouchDown(MotionEvent ev, BubbleTextView icon) {
+        mTouchedIcon = icon;
+        mInitialPointerId = ev.getPointerId(0);
         mDownX = ev.getX();
         mDownY = ev.getY();
-        mWorkspaceDownX = coord[0];
-        mWorkspaceDownY = coord[1];
-        mStartedOnIconWithGesture = mWorkspace.isTouchOnIconWithSwipeGesture(
-                coord[0], coord[1], true) || mWorkspace.isTouchOnIconWithSwipeGesture(
-                coord[0], coord[1], false);
     }
 
     /** Returns whether the initial pointer moves toward an action configured on the touched icon. */
     public boolean isMovingTowardConfiguredIconGesture(MotionEvent ev) {
-        if (!mStartedOnIconWithGesture || ev.getActionMasked() != MotionEvent.ACTION_MOVE
+        if (mTouchedIcon == null || ev.getActionMasked() != MotionEvent.ACTION_MOVE
                 || ev.getPointerCount() != 1) {
             return false;
         }
@@ -67,15 +78,15 @@ public final class IconGestureTouchTracker {
         if (pointerIndex < 0) {
             return false;
         }
-        return mWorkspace.isTouchOnIconWithSwipeGestureInDirection(
-                mWorkspaceDownX, mWorkspaceDownY, ev.getX(pointerIndex) - mDownX,
-                ev.getY(pointerIndex) - mDownY);
+        float diffX = ev.getX(pointerIndex) - mDownX;
+        float diffY = ev.getY(pointerIndex) - mDownY;
+        return Math.max(Math.abs(diffX), Math.abs(diffY)) >= mTouchSlop
+                && mTouchedIcon.hasConfiguredIconSwipeGestureForDirection(diffX, diffY);
     }
 
     /** Clears the touch state after the gesture finishes or is cancelled. */
     public void reset() {
-        mStartedOnIconWithGesture = false;
         mInitialPointerId = MotionEvent.INVALID_POINTER_ID;
-        mWorkspace = null;
+        mTouchedIcon = null;
     }
 }
