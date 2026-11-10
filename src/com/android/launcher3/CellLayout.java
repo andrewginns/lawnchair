@@ -975,18 +975,36 @@ public class CellLayout extends ViewGroup {
                 || halfY > (mCountY - 1) * 2 || ((halfX | halfY) & 1) == 0) {
             return null;
         }
+        if (hasPlacementCollision(halfX, halfY, 2, 2, ignore)) return null;
+        return new SubgridPosition(halfX / 2, halfY / 2, (halfX & 1) != 0, (halfY & 1) != 0);
+    }
+
+    boolean isWorkspacePlacementOccupied(ItemInfo item, int x, int y) {
+        int halfX = x * 2 + (item.cellXHalf ? 1 : 0);
+        int halfY = y * 2 + (item.cellYHalf ? 1 : 0);
+        int spanX = item.spanX * 2;
+        int spanY = item.spanY * 2;
+        return halfX < 0 || halfY < 0 || halfX + spanX > mCountX * 2
+                || halfY + spanY > mCountY * 2
+                || (!PreferenceCacheExtensionsKt.firstCached(pref.getAllowWidgetOverlap())
+                && hasPlacementCollision(halfX, halfY, spanX, spanY, null));
+    }
+
+    // Coordinates and spans here are measured in half cells, including for whole-cell items.
+    private boolean hasPlacementCollision(int halfX, int halfY, int spanX, int spanY,
+            @Nullable View ignore) {
         for (int i = 0; i < mShortcutsAndWidgets.getChildCount(); i++) {
             View child = mShortcutsAndWidgets.getChildAt(i);
             if (child == ignore) continue;
             CellLayoutLayoutParams lp = (CellLayoutLayoutParams) child.getLayoutParams();
             int left = lp.getCellX() * 2 + (lp.cellXHalf ? 1 : 0);
             int top = lp.getCellY() * 2 + (lp.cellYHalf ? 1 : 0);
-            if (halfX + 2 > left && halfX < left + lp.cellHSpan * 2
-                    && halfY + 2 > top && halfY < top + lp.cellVSpan * 2) {
-                return null;
+            if (halfX + spanX > left && halfX < left + lp.cellHSpan * 2
+                    && halfY + spanY > top && halfY < top + lp.cellVSpan * 2) {
+                return true;
             }
         }
-        return new SubgridPosition(halfX / 2, halfY / 2, (halfX & 1) != 0, (halfY & 1) != 0);
+        return false;
     }
 
     private int subgridOffsetX(CellLayoutLayoutParams lp) {
