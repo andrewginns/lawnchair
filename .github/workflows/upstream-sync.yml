@@ -178,7 +178,7 @@ jobs:
           for attempt in {1..6}; do
             if adb shell uiautomator dump /sdcard/launcher-smoke.xml >/dev/null &&
                adb exec-out cat /sdcard/launcher-smoke.xml > "$RUNNER_TEMP/launcher-smoke.xml" &&
-               grep -Fq 'content-desc="All apps"' "$RUNNER_TEMP/launcher-smoke.xml"; then
+               grep -Fq "resource-id=\"$package:id/apps_list_view\"" "$RUNNER_TEMP/launcher-smoke.xml"; then
               drawer=true
               break
             fi
