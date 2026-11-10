@@ -2,7 +2,6 @@ package app.lawnchair.gestures
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.util.Log
 import android.view.GestureDetector
 import android.view.GestureDetector.SimpleOnGestureListener
 import android.view.MotionEvent
@@ -60,35 +59,13 @@ abstract class DirectionalGestureListener(ctx: Context?) : OnTouchListener {
         ): Boolean {
             val diffY = e2.y - (e1?.y ?: 0f)
             val diffX = e2.x - (e1?.x ?: 0f)
-            val verticalThreshold = if (diffY > 0 && diffY >= abs(diffX)) swipeDownDistanceThreshold else SWIPE_THRESHOLD
-            val verticalSwipe = shouldReactToSwipe(diffY, velocityY, verticalThreshold)
-            val horizontalSwipe = shouldReactToSwipe(diffX, velocityX)
-
-            Log.d("GESTURE_DETECTION", "onFling: y $verticalSwipe")
-            Log.d("GESTURE_DETECTION", "onFling: X $horizontalSwipe")
-
-            handledGesture = when {
-                verticalSwipe -> {
-                    if (diffY < 0) {
-                        Log.d("GESTURE_DETECTION", "Swipe Up Detected")
-                        onSwipeTop(velocityY)
-                    } else {
-                        Log.d("GESTURE_DETECTION", "Swipe Down Detected")
-                        onSwipeDown(velocityY)
-                    }
-                }
-
-                horizontalSwipe -> {
-                    if (diffX > 0) {
-                        Log.d("GESTURE_DETECTION", "Swipe Right Detected")
-                        onSwipeRight(velocityX)
-                    } else {
-                        Log.d("GESTURE_DETECTION", "Swipe Left Detected")
-                        onSwipeLeft(velocityX)
-                    }
-                }
-
-                else -> false
+            handledGesture = if (abs(diffY) >= abs(diffX)) {
+                val threshold = if (diffY > 0) swipeDownDistanceThreshold else SWIPE_THRESHOLD
+                shouldReactToSwipe(diffY, velocityY, threshold) &&
+                    if (diffY < 0) onSwipeTop(velocityY) else onSwipeDown(velocityY)
+            } else {
+                shouldReactToSwipe(diffX, velocityX) &&
+                    if (diffX > 0) onSwipeRight(velocityX) else onSwipeLeft(velocityX)
             }
             return handledGesture
         }

@@ -20,7 +20,9 @@ import com.android.launcher3.GridType
 import com.android.launcher3.LauncherAppState
 import com.android.launcher3.LauncherFiles
 import com.android.launcher3.LauncherPrefs
+import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.R
+import com.android.launcher3.model.DatabaseHelper
 import com.android.launcher3.model.DeviceGridState
 import com.android.launcher3.provider.RestoreDbTask
 import com.google.protobuf.Timestamp
@@ -89,7 +91,15 @@ class LawnchairBackup(
                 val layout = File(staging, LAUNCHER_DB_FILE_NAME)
                 require(layout.isFile) { "Backup has no launcher database" }
                 SQLiteDatabase.openDatabase(layout.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
-                    db.rawQuery("SELECT _id FROM favorites LIMIT 1", null).use { it.moveToFirst() }
+                    require(db.version <= DatabaseHelper.SCHEMA_VERSION) { "Backup uses a newer launcher database" }
+                    // AppWidgetSource was the last column added to the native layout schema.
+                    val columns = if (db.version >= 29) {
+                        Favorites.getColumns(0)
+                    } else {
+                        "${Favorites._ID}, ${Favorites.PROFILE_ID}"
+                    }
+                    db.rawQuery("SELECT $columns FROM ${Favorites.TABLE_NAME} LIMIT 1", null)
+                        .use { it.moveToFirst() }
                 }
                 validatedGrid(info)
                 File(staging, INFO_FILE_NAME).outputStream().use { info.writeTo(it) }

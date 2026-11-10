@@ -274,10 +274,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     private FolderIcon mDragOverFolderIcon = null;
     private boolean mCreateUserFolderOnDrop = false;
     private boolean mAddToExistingFolderOnDrop = false;
-    private boolean mStartedOnIconWithHorizontalGesture;
-    private boolean mHandlingPagedViewIconSwipe;
-    private float mIconSwipeDownX;
-    private float mIconSwipeDownY;
+    private final IconGestureTouchTracker mPagedIconGestureTracker;
 
     // Variables relating to touch disambiguation (scrolling workspace vs. scrolling a widget)
     private float mXDown;
@@ -365,6 +362,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     public Workspace(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
         mLauncher = Launcher.getLauncher(context);
+        mPagedIconGestureTracker = new IconGestureTouchTracker(context);
         mStateTransitionAnimation = new WorkspaceStateTransitionAnimation(mLauncher, this);
         mWallpaperManager = WallpaperManager.getInstance(context);
         mAllAppsIconSize = mLauncher.getDeviceProfile().getAllAppsProfile().getIconSizePx();
@@ -1210,88 +1208,28 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      */
     @Override
     public boolean onInterceptTouchEvent(MotionEvent ev) {
-        if (shouldSkipPagedViewInterceptionForIconSwipe(ev)) {
-            return false;
-        } // Lawnchair: Icon swipe gesture feature
-        return onInterceptTouchEventFromHotseat(ev);
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                mPagedIconGestureTracker.onTouchDown(ev, findIconAtPosition(ev.getX(), ev.getY()));
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                mPagedIconGestureTracker.reset();
+                break;
+        }
+        return interceptWorkspaceTouch(ev);
     }
 
     // Hotseat already checked icon gestures in its own coordinate space.
     boolean onInterceptTouchEventFromHotseat(MotionEvent ev) {
-        if (isTrackpadMultiFingerSwipe(ev)) {
-            return false;
+        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            mPagedIconGestureTracker.reset();
         }
-        return super.onInterceptTouchEvent(ev);
+        return interceptWorkspaceTouch(ev);
     }
 
-    // Lawnchair: Icon swipe gesture feature
-    private boolean shouldSkipPagedViewInterceptionForIconSwipe(MotionEvent ev) {
-        switch (ev.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                mStartedOnIconWithHorizontalGesture = isTouchOnIconWithSwipeGesture(
-                        ev.getX(), ev.getY(), false);
-                if (mStartedOnIconWithHorizontalGesture) {
-                    mHandlingPagedViewIconSwipe = false;
-                    mIconSwipeDownX = ev.getX();
-                    mIconSwipeDownY = ev.getY();
-                }
-                return false;
-
-            case MotionEvent.ACTION_MOVE:
-                if (!mStartedOnIconWithHorizontalGesture) {
-                    return false;
-                }
-                if (!mHandlingPagedViewIconSwipe) {
-                    mHandlingPagedViewIconSwipe = isMovingTowardConfiguredHorizontalIconGesture(ev);
-                }
-                return mHandlingPagedViewIconSwipe;
-
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                boolean shouldSkip = mHandlingPagedViewIconSwipe;
-                mStartedOnIconWithHorizontalGesture = false;
-                mHandlingPagedViewIconSwipe = false;
-                if (shouldSkip) {
-                    resetTouchState();
-                }
-                return shouldSkip;
-
-            default:
-                return false;
-        }
-    }
-
-    private boolean isMovingTowardConfiguredHorizontalIconGesture(MotionEvent ev) {
-        float diffX = ev.getX() - mIconSwipeDownX;
-        float diffY = ev.getY() - mIconSwipeDownY;
-        if (Math.abs(diffX) <= mTouchSlop || Math.abs(diffX) <= Math.abs(diffY)) {
-            return false;
-        }
-        return isTouchOnIconWithSwipeGestureInDirection(
-                mIconSwipeDownX, mIconSwipeDownY, diffX, diffY);
-    }
-
-    // Lawnchair: Icon swipe gesture feature
-    public boolean isTouchOnIconWithSwipeGesture(float x, float y, boolean vertical) {
-        boolean hasConfiguredIconSwipeGesture = false;
-        if (findIconAtPosition(x, y) instanceof BubbleTextView touchedIcon) {
-            if (vertical) {
-                hasConfiguredIconSwipeGesture = touchedIcon.hasConfiguredVerticalIconSwipeGesture();
-            } else {
-                hasConfiguredIconSwipeGesture = touchedIcon.hasConfiguredHorizontalIconSwipeGesture();
-            }
-        }
-        return hasConfiguredIconSwipeGesture;
-    }
-
-    /**
-     * Returns whether the touched icon has a gesture configured for the direction described by
-     * {@code diffX} and {@code diffY}. The dominant axis matches icon gesture direction locking.
-     */
-    public boolean isTouchOnIconWithSwipeGestureInDirection(
-            float x, float y, float diffX, float diffY) {
-        return findIconAtPosition(x, y) instanceof BubbleTextView touchedIcon
-                && touchedIcon.hasConfiguredIconSwipeGestureForDirection(diffX, diffY);
+    private boolean interceptWorkspaceTouch(MotionEvent ev) {
+        return !isTrackpadMultiFingerSwipe(ev) && super.onInterceptTouchEvent(ev);
     }
 
     // Lawnchair: Icon swipe gesture feature
@@ -1301,8 +1239,8 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             if (!(child instanceof CellLayout cellLayout)) {
                 continue;
             }
-            float localX = x - child.getLeft();
-            float localY = y - child.getTop();
+            float localX = x + getScrollX() - child.getX();
+            float localY = y + getScrollY() - child.getY();
             if (!Utilities.pointInView(cellLayout, localX, localY, 0)) {
                 continue;
             }
@@ -1442,7 +1380,10 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
 
     @Override
     protected void determineScrollingStart(MotionEvent ev) {
-        if (!isFinishedSwitchingState() || mIsEventOverFirstPagePinnedItem) return;
+        if (!isFinishedSwitchingState() || mIsEventOverFirstPagePinnedItem
+                || mPagedIconGestureTracker.isMovingTowardConfiguredIconGesture(ev)) {
+            return;
+        }
 
         float deltaX = ev.getX() - mXDown;
         float absDeltaX = Math.abs(deltaX);

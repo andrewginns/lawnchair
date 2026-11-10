@@ -57,7 +57,8 @@ public final class IconGestureTouchTracker {
                 coord[0] = ev.getX();
                 coord[1] = ev.getY();
                 launcher.getDragLayer().mapCoordInSelfToDescendant(workspace, coord);
-                icon = workspace.findIconAtPosition(coord[0], coord[1]);
+                icon = workspace.findIconAtPosition(
+                        coord[0] - workspace.getScrollX(), coord[1] - workspace.getScrollY());
             }
         }
         onTouchDown(ev, icon);

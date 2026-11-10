@@ -782,22 +782,6 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
                 && mGestureListener.hasAnyGestureConfigured();
     }
 
-    /** Lawnchair: Check if icon swipe feature is enabled, 
-     * and has a horizontal gesture configured for it */
-    public boolean hasConfiguredHorizontalIconSwipeGesture() {
-        return mGestureListener != null
-                && isIconSwipeGestureEnabledForCurrentState()
-                && mGestureListener.hasHorizontalGestureConfigured();
-    }
-
-    /** Lawnchair: Check if icon swipe feature is enabled, 
-     * and has a vertical gesture configured for it */
-    public boolean hasConfiguredVerticalIconSwipeGesture() {
-        return mGestureListener != null
-            && isIconSwipeGestureEnabledForCurrentState()
-            && mGestureListener.hasVerticalGestureConfigured();
-    }
-
     /** Lawnchair: Check whether this icon has a gesture configured for the dominant direction. */
     public boolean hasConfiguredIconSwipeGestureForDirection(float diffX, float diffY) {
         if (mGestureListener == null || !isIconSwipeGestureEnabledForCurrentState()) {

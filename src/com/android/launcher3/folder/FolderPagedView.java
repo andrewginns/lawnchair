@@ -41,8 +41,10 @@ import com.android.launcher3.CellLayout;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.PagedView;
 import com.android.launcher3.R;
+import com.android.launcher3.IconGestureTouchTracker;
 import com.android.launcher3.ShortcutAndWidgetContainer;
 import com.android.launcher3.Utilities;
+import com.android.launcher3.Workspace;
 import com.android.launcher3.apppairs.AppPairIcon;
 import com.android.launcher3.celllayout.CellLayoutLayoutParams;
 import com.android.launcher3.graphics.PathWrapper;
@@ -106,10 +108,7 @@ public class FolderPagedView extends PagedView<PageIndicatorDots> implements Cli
     private boolean mViewsBound = false;
 
     private boolean mCanAnnouncePageDescription;
-    private boolean mStartedOnIconWithHorizontalGesture; // Lawnchair: Icon swipe gesture feature
-    private boolean mHandlingPagedViewIconSwipe;
-    private float mIconSwipeDownX;
-    private float mIconSwipeDownY;
+    private final IconGestureTouchTracker mIconGestureTracker;
 
     public FolderPagedView(Context context, AttributeSet attrs) {
         this(
@@ -125,6 +124,7 @@ public class FolderPagedView extends PagedView<PageIndicatorDots> implements Cli
             FolderGridOrganizer folderGridOrganizer
     ) {
         super(context, attrs);
+        mIconGestureTracker = new IconGestureTouchTracker(context);
         ActivityContext activityContext = ActivityContext.lookupContext(context);
         mOrganizer = folderGridOrganizer;
 
@@ -170,67 +170,25 @@ public class FolderPagedView extends PagedView<PageIndicatorDots> implements Cli
         }
     }
 
-    // Lawnchair: Icon swipe gesture feature
     @Override
     public boolean onInterceptTouchEvent(MotionEvent ev) {
-        if (shouldSkipPagedViewInterceptionForIconSwipe(ev)) {
-            return false;
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                mIconGestureTracker.onTouchDown(ev, findIconAtPosition(ev.getX(), ev.getY()));
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                mIconGestureTracker.reset();
+                break;
         }
         return super.onInterceptTouchEvent(ev);
     }
 
-    // Lawnchair: Icon swipe gesture feature
-    private boolean shouldSkipPagedViewInterceptionForIconSwipe(MotionEvent ev) {
-        switch (ev.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                mStartedOnIconWithHorizontalGesture = isTouchOnIconWithHorizontalSwipeGesture(
-                        ev.getX(), ev.getY());
-                if (mStartedOnIconWithHorizontalGesture) {
-                    mHandlingPagedViewIconSwipe = false;
-                    mIconSwipeDownX = ev.getX();
-                    mIconSwipeDownY = ev.getY();
-                }
-                return false;
-
-            case MotionEvent.ACTION_MOVE:
-                if (!mStartedOnIconWithHorizontalGesture) {
-                    return false;
-                }
-                if (!mHandlingPagedViewIconSwipe) {
-                    mHandlingPagedViewIconSwipe = isMovingTowardConfiguredHorizontalIconGesture(ev);
-                }
-                return mHandlingPagedViewIconSwipe;
-
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                boolean shouldSkip = mHandlingPagedViewIconSwipe;
-                mStartedOnIconWithHorizontalGesture = false;
-                mHandlingPagedViewIconSwipe = false;
-                if (shouldSkip) {
-                    resetTouchState();
-                }
-                return shouldSkip;
-
-            default:
-                return false;
+    @Override
+    protected void determineScrollingStart(MotionEvent ev) {
+        if (!mIconGestureTracker.isMovingTowardConfiguredIconGesture(ev)) {
+            super.determineScrollingStart(ev);
         }
-    }
-
-    private boolean isMovingTowardConfiguredHorizontalIconGesture(MotionEvent ev) {
-        float diffX = ev.getX() - mIconSwipeDownX;
-        float diffY = ev.getY() - mIconSwipeDownY;
-        if (Math.abs(diffX) <= mTouchSlop || Math.abs(diffX) <= Math.abs(diffY)) {
-            return false;
-        }
-        BubbleTextView touchedIcon = findIconAtPosition(mIconSwipeDownX, mIconSwipeDownY);
-        return touchedIcon != null
-                && touchedIcon.hasConfiguredIconSwipeGestureForDirection(diffX, diffY);
-    }
-
-    // Lawnchair: Icon swipe gesture feature
-    private boolean isTouchOnIconWithHorizontalSwipeGesture(float x, float y) {
-        BubbleTextView touchedIcon = findIconAtPosition(x, y);
-        return touchedIcon != null && touchedIcon.hasConfiguredHorizontalIconSwipeGesture();
     }
 
     /** Lawnchair: Find icon at specific position */
@@ -240,35 +198,14 @@ public class FolderPagedView extends PagedView<PageIndicatorDots> implements Cli
             if (!(page instanceof CellLayout cellLayout)) {
                 continue;
             }
-            float localX = x - page.getLeft();
-            float localY = y - page.getTop();
+            float localX = x + getScrollX() - page.getX();
+            float localY = y + getScrollY() - page.getY();
             if (!Utilities.pointInView(cellLayout, localX, localY, 0)) {
                 continue;
             }
-            BubbleTextView foundView = findIconInCellLayout(cellLayout, localX, localY);
-            if (foundView != null) {
+            if (Workspace.findIconInCellLayout(cellLayout, localX, localY)
+                    instanceof BubbleTextView foundView) {
                 return foundView;
-            }
-        }
-        return null;
-    }
-
-    /** Lawnchair: Find icon in cell layout */
-    private BubbleTextView findIconInCellLayout(CellLayout cellLayout, float x, float y) {
-        ShortcutAndWidgetContainer container = cellLayout.getShortcutsAndWidgets();
-        float containerX = x - container.getLeft();
-        float containerY = y - container.getTop();
-        for (int i = container.getChildCount() - 1; i >= 0; i--) {
-            View child = container.getChildAt(i);
-            if (!(child instanceof BubbleTextView bubbleTextView)
-                    || child.getVisibility() != View.VISIBLE) {
-                continue;
-            }
-            if (Utilities.pointInView(child,
-                    containerX - child.getLeft(),
-                    containerY - child.getTop(),
-                    0)) {
-                return bubbleTextView;
             }
         }
         return null;
