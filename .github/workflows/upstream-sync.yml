@@ -31,6 +31,7 @@ jobs:
     outputs:
       candidate: ${{ steps.prepare.outputs.candidate }}
       pull_request: ${{ steps.prepare.outputs.pull_request }}
+      base_commit: ${{ steps.prepare.outputs.base_commit }}
     steps:
       - name: Check the fortnightly schedule
         id: due
@@ -102,14 +103,17 @@ jobs:
           if [[ -z "$pr" ]]; then
             printf '%s\n\n%s\n' \
               'Merges LawnchairLauncher/lawnchair 16-dev into the Nova-style branch.' \
-              'Wait for the Android build and emulator smoke check, then use a merge commit to preserve upstream history.' \
+              'The sync workflow merges this PR after the style, Android build, and emulator checks pass.' \
               > "$RUNNER_TEMP/upstream-sync-pr.md"
-            gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE_BRANCH" --head "$SYNC_BRANCH" \
-              --title 'Sync Lawnchair upstream 16-dev' --body-file "$RUNNER_TEMP/upstream-sync-pr.md"
+            pr_url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE_BRANCH" --head "$SYNC_BRANCH" \
+              --title 'Sync Lawnchair upstream 16-dev' --body-file "$RUNNER_TEMP/upstream-sync-pr.md")
+            echo "$pr_url"
+            pr=${pr_url##*/}
           fi
 
           echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
-          echo "pull_request=true" >> "$GITHUB_OUTPUT"
+          echo "pull_request=$pr" >> "$GITHUB_OUTPUT"
+          echo "base_commit=$base" >> "$GITHUB_OUTPUT"
 
   verify:
     needs: sync
@@ -131,8 +135,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: true
-      - name: Build debug APK
-        run: ./gradlew assembleLawnWithQuickstepNightlyDebug --console=plain
+      - name: Check formatting and build debug APK
+        run: ./gradlew spotlessCheck assembleLawnWithQuickstepNightlyDebug --console=plain
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -148,12 +152,13 @@ jobs:
           package=$(python3 -c 'import json; print(json.load(open("build/outputs/apk/lawnWithQuickstepNightly/debug/output-metadata.json"))["applicationId"])')
           adb install "$apk"
           adb logcat -b crash -c
-          home=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME -p "$package" | tail -1 | tr -d '\r')
-          [[ "$home" == "$package/"* ]]
-          adb shell cmd package set-home-activity "$home"
-          adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME -n "$home" | grep -F 'Status: ok'
+          launcher_component=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME -p "$package" | tail -1 | tr -d '\r')
+          [[ "$launcher_component" == "$package/"* ]]
+          adb shell cmd package set-home-activity "$launcher_component"
+          sleep 2
+          adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME -n "$launcher_component" | grep -F 'Status: ok'
 
-          adb shell am start -W -a android.intent.action.ALL_APPS -n "$home" | grep -F 'Status: ok'
+          adb shell am start -W -a android.intent.action.ALL_APPS -n "$launcher_component" | grep -F 'Status: ok'
           drawer=false
           for attempt in {1..6}; do
             if adb shell uiautomator dump /sdcard/launcher-smoke.xml >/dev/null &&
@@ -187,7 +192,7 @@ jobs:
 
   report:
     needs: [sync, verify]
-    if: always() && needs.sync.outputs.pull_request == 'true'
+    if: always() && needs.sync.outputs.pull_request != ''
     runs-on: ubuntu-latest
     permissions:
       statuses: write
@@ -205,3 +210,28 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$CANDIDATE" \
             -f state="$state" -f context="$STATUS_CONTEXT" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+
+  merge:
+    needs: [sync, verify, report]
+    if: needs.sync.outputs.pull_request != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Merge the tested sync PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.sync.outputs.pull_request }}
+          CANDIDATE: ${{ needs.sync.outputs.candidate }}
+          BASE_COMMIT: ${{ needs.sync.outputs.base_commit }}
+        run: |
+          current_base=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BASE_BRANCH" --jq '.object.sha')
+          if [[ "$current_base" != "$BASE_COMMIT" ]]; then
+            echo "::error::The target branch changed during testing. Rerun the sync to test the new merge."
+            exit 1
+          fi
+          pr_refs=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json baseRefName,headRefName,state --jq '[.baseRefName,.headRefName,.state]|join(":")')
+          [[ "$pr_refs" == "$BASE_BRANCH:$SYNC_BRANCH:OPEN" ]]
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge --match-head-commit "$CANDIDATE"
