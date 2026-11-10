@@ -1,0 +1,207 @@
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: '23 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      verify_current:
+        description: Run Android checks even when the fork is already up to date
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: upstream-sync
+
+env:
+  BASE_BRANCH: nova-style-gestures-and-layout
+  SYNC_BRANCH: automation/upstream-16-dev
+  STATUS_CONTEXT: Upstream sync / Android build and smoke test
+
+jobs:
+  sync:
+    if: github.repository == 'andrewginns/lawnchair' && github.ref == 'refs/heads/16-dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+    outputs:
+      candidate: ${{ steps.prepare.outputs.candidate }}
+      pull_request: ${{ steps.prepare.outputs.pull_request }}
+    steps:
+      - name: Check the fortnightly schedule
+        id: due
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          # A weekly cron with an epoch-based parity check keeps 14-day intervals across New Year.
+          monday=$(date -u -d '2026-11-16' +%s)
+          week=$(( ($(date -u +%s) - monday) / 604800 ))
+          if [[ "$EVENT" != schedule ]] || (( week % 2 == 0 )); then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.due.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+
+      - name: Prepare and open the sync PR
+        if: steps.due.outputs.run == 'true'
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFY_CURRENT: ${{ inputs.verify_current }}
+        run: |
+          git fetch origin "refs/heads/$BASE_BRANCH"
+          base=$(git rev-parse FETCH_HEAD)
+          git fetch https://github.com/LawnchairLauncher/lawnchair.git refs/heads/16-dev
+          upstream=$(git rev-parse FETCH_HEAD)
+
+          if git merge-base --is-ancestor "$upstream" "$base"; then
+            echo "The target branch already includes upstream $upstream."
+            if [[ "$VERIFY_CURRENT" == true ]]; then
+              echo "candidate=$base" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          pr=$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open \
+            -f base="$BASE_BRANCH" -f head="$GITHUB_REPOSITORY_OWNER:$SYNC_BRANCH" \
+            --jq '.[0].number // empty')
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          sync_ref=$(git ls-remote origin "refs/heads/$SYNC_BRANCH")
+          if [[ -n "$sync_ref" ]]; then
+            git fetch origin "refs/heads/$SYNC_BRANCH"
+            git switch --detach FETCH_HEAD
+            git merge --no-edit "$base"
+          else
+            git switch --detach "$base"
+          fi
+          if ! git merge --no-edit "$upstream"; then
+            echo "::error::Resolve the upstream 16-dev merge conflicts before syncing."
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+          candidate=$(git rev-parse HEAD)
+
+          if ! git push origin "HEAD:refs/heads/$SYNC_BRANCH"; then
+            if ! git diff --quiet "$base" "$candidate" -- .github/workflows/; then
+              echo "::error::Upstream changes workflow files. If GitHub rejected the bot's token, push the merge with a maintainer's workflow permission."
+            fi
+            exit 1
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$candidate" \
+            -f state=pending -f context="$STATUS_CONTEXT" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+
+          if [[ -z "$pr" ]]; then
+            printf '%s\n\n%s\n' \
+              'Merges LawnchairLauncher/lawnchair 16-dev into the Nova-style branch.' \
+              'Wait for the Android build and emulator smoke check, then use a merge commit to preserve upstream history.' \
+              > "$RUNNER_TEMP/upstream-sync-pr.md"
+            gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE_BRANCH" --head "$SYNC_BRANCH" \
+              --title 'Sync Lawnchair upstream 16-dev' --body-file "$RUNNER_TEMP/upstream-sync-pr.md"
+          fi
+
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "pull_request=true" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: sync
+    if: needs.sync.outputs.candidate != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.sync.outputs.candidate }}
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: true
+      - name: Build debug APK
+        run: ./gradlew assembleLawnWithQuickstepNightlyDebug --console=plain
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Prepare the launcher smoke test
+        run: |
+          cat > "$RUNNER_TEMP/launcher-smoke.sh" <<'BASH'
+          set -euo pipefail
+          apk=$(find build/outputs/apk/lawnWithQuickstepNightly/debug -name '*.apk' -print -quit)
+          test -n "$apk"
+          package=$(python3 -c 'import json; print(json.load(open("build/outputs/apk/lawnWithQuickstepNightly/debug/output-metadata.json"))["applicationId"])')
+          adb install "$apk"
+          adb logcat -b crash -c
+          home=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME -p "$package" | tail -1 | tr -d '\r')
+          [[ "$home" == "$package/"* ]]
+          adb shell cmd package set-home-activity "$home"
+          adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.HOME -n "$home" | grep -F 'Status: ok'
+
+          adb shell am start -W -a android.intent.action.ALL_APPS -n "$home" | grep -F 'Status: ok'
+          drawer=false
+          for attempt in {1..6}; do
+            if adb shell uiautomator dump /sdcard/launcher-smoke.xml >/dev/null &&
+               adb exec-out cat /sdcard/launcher-smoke.xml > "$RUNNER_TEMP/launcher-smoke.xml" &&
+               grep -Fq 'content-desc="All apps"' "$RUNNER_TEMP/launcher-smoke.xml"; then
+              drawer=true
+              break
+            fi
+            sleep 2
+          done
+          [[ "$drawer" == true ]] || { echo 'App drawer did not open'; exit 1; }
+
+          adb shell am start -W -a android.intent.action.VIEW -d lawnchair://settings/home-screen \
+            -n "$package/app.lawnchair.ui.preferences.PreferenceActivity" | grep -F 'Status: ok'
+          adb shell input keyevent KEYCODE_HOME
+          sleep 2
+          adb shell dumpsys activity activities | grep 'topResumedActivity' | grep -F "$package/"
+          crashes=$(adb logcat -b crash -d)
+          if grep -Fq "Process: $package," <<< "$crashes"; then
+            echo "$crashes"
+            exit 1
+          fi
+          BASH
+      - name: Run Android 16 launcher smoke tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          script: bash "$RUNNER_TEMP/launcher-smoke.sh"
+
+  report:
+    needs: [sync, verify]
+    if: always() && needs.sync.outputs.pull_request == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Report the result on the tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ needs.sync.outputs.candidate }}
+          RESULT: ${{ needs.verify.result }}
+        run: |
+          state=failure
+          if [[ "$RESULT" == success ]]; then
+            state=success
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$CANDIDATE" \
+            -f state="$state" -f context="$STATUS_CONTEXT" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
