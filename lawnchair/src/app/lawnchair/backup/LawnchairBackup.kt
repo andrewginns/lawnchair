@@ -3,10 +3,12 @@ package app.lawnchair.backup
 import android.annotation.SuppressLint
 import android.app.WallpaperManager
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.core.graphics.drawable.toBitmap
+import app.lawnchair.DeviceProfileOverrides
 import app.lawnchair.LawnchairProto.BackupInfo
 import app.lawnchair.util.hasFlag
 import app.lawnchair.util.scaleDownTo
@@ -14,17 +16,21 @@ import app.lawnchair.util.scaleDownToDisplaySize
 import app.lawnchair.wallpaper.WallpaperColorsCompat
 import app.lawnchair.wallpaper.WallpaperManagerCompat
 import com.android.launcher3.BuildConfig
+import com.android.launcher3.GridType
 import com.android.launcher3.LauncherAppState
 import com.android.launcher3.LauncherFiles
+import com.android.launcher3.LauncherPrefs
 import com.android.launcher3.R
 import com.android.launcher3.model.DeviceGridState
-import com.android.launcher3.model.ModelDbController
 import com.android.launcher3.provider.RestoreDbTask
 import com.google.protobuf.Timestamp
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.zip.ZipEntry
@@ -57,34 +63,43 @@ class LawnchairBackup(
         wallpaper = tmpWallpaper?.scaleDownToDisplaySize(context)
     }
 
-    suspend fun restore(selectedContents: Int) {
-        val handlers = mutableMapOf<String, suspend (InputStream) -> Unit>()
+    suspend fun restore(selectedContents: Int): Unit = withContext(Dispatchers.IO) {
         val contents = selectedContents and info.contents
-        if (contents.hasFlag(INCLUDE_LAYOUT_AND_SETTINGS)) {
-            handlers.putAll(
-                getFiles(context, forRestore = true).mapValues { entry ->
-                    {
-                        val file = entry.value
-                        file.parentFile?.mkdirs()
-                        file.outputStream().use { out -> it.copyTo(out) }
+        val staging = if (contents.hasFlag(INCLUDE_LAYOUT_AND_SETTINGS)) {
+            Files.createTempDirectory(context.filesDir.toPath(), "restore-").toFile()
+        } else {
+            null
+        }
+        try {
+            val handlers = mutableMapOf<String, suspend (InputStream) -> Unit>()
+            if (staging != null) {
+                getFiles(context, forRestore = true).keys.forEach { name ->
+                    handlers[name] = { input ->
+                        File(staging, name).outputStream().use { input.copyTo(it) }
                     }
-                },
-            )
-        }
-        if (contents.hasFlag(INCLUDE_WALLPAPER)) {
-            handlers[WALLPAPER_FILE_NAME] = {
-                val wallpaperManager = WallpaperManager.getInstance(context)
-                wallpaperManager.setBitmap(BitmapFactory.decodeStream(it))
+                }
             }
+            if (contents.hasFlag(INCLUDE_WALLPAPER)) {
+                handlers[WALLPAPER_FILE_NAME] = {
+                    WallpaperManager.getInstance(context).setBitmap(BitmapFactory.decodeStream(it))
+                }
+            }
+            readZip(handlers)
+            if (staging != null) {
+                val layout = File(staging, LAUNCHER_DB_FILE_NAME)
+                require(layout.isFile) { "Backup has no launcher database" }
+                SQLiteDatabase.openDatabase(layout.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+                    db.rawQuery("SELECT _id FROM favorites LIMIT 1", null).use { it.moveToFirst() }
+                }
+                validatedGrid(info)
+                File(staging, INFO_FILE_NAME).outputStream().use { info.writeTo(it) }
+                val pending = pendingRestore(context)
+                check(!pending.exists() || pending.deleteRecursively()) { "Unable to replace the pending backup" }
+                Files.move(staging.toPath(), pending.toPath(), ATOMIC_MOVE)
+            }
+        } finally {
+            staging?.deleteRecursively()
         }
-        context.getDatabasePath(LAUNCHER_DB_FILE_NAME).parentFile?.deleteRecursively()
-        readZip(handlers)
-        // Written after the zip has been extracted: the backed up preferences file is one of
-        // the restored entries, so writing the grid state first would let it be overwritten.
-        DeviceGridState(info.gridState).writeToPrefs(context, true)
-
-        val dbController = ModelDbController(context)
-        RestoreDbTask.performRestore(context, dbController)
     }
 
     private suspend fun readZip(handlers: Map<String, suspend (InputStream) -> Unit>) {
@@ -116,6 +131,12 @@ class LawnchairBackup(
         const val SCREENSHOT_FILE_NAME = "screenshot.png"
         const val LAUNCHER_DB_FILE_NAME = "launcher.db"
         const val RESTORED_DB_FILE_NAME = "restored.db"
+        const val NATIVE_RESTORED_DB_FILE_NAME = "native-restored.db"
+        private const val PENDING_RESTORE_DIR = "pending-native-restore"
+        private const val RESTORE_PREFS_NAME = "lawnchair-native-restore"
+        private const val WORKSPACE_COLUMNS = "pref_workspaceColumns"
+        private const val WORKSPACE_ROWS = "pref_workspaceRows"
+        private const val DOCK_COLUMNS = "pref_hotseatColumns"
 
         const val INCLUDE_LAYOUT_AND_SETTINGS = 1 shl 0
         const val INCLUDE_WALLPAPER = 1 shl 1
@@ -127,6 +148,93 @@ class LawnchairBackup(
             INCLUDE_LAYOUT_AND_SETTINGS to R.string.backup_content_layout_and_settings,
             INCLUDE_WALLPAPER to R.string.backup_content_wallpaper,
         )
+
+        private fun pendingRestore(context: Context) = File(context.filesDir, PENDING_RESTORE_DIR)
+
+        private fun validatedGrid(info: BackupInfo): DeviceGridState {
+            val grid = DeviceGridState(info.gridState)
+            require(grid.columns in 1..20 && grid.rows in 1..20 && grid.numHotseat in 1..40) {
+                "Backup has invalid grid dimensions"
+            }
+            return grid
+        }
+
+        /** Apply the archive before the new process initializes its preferences or launcher model. */
+        @Suppress("DEPRECATION")
+        fun installPendingRestore(context: Context) {
+            val pending = pendingRestore(context)
+            if (!pending.isDirectory) return
+            try {
+                val info = File(pending, INFO_FILE_NAME).inputStream().use { BackupInfo.parseFrom(it) }
+                val grid = validatedGrid(info)
+                val savedPrefs = File(pending, PREFS_FILE_NAME)
+                val scratch = File(prefsFile(context).parentFile, "$RESTORE_PREFS_NAME.xml")
+                context.deleteSharedPreferences(RESTORE_PREFS_NAME)
+                val restoredPrefs = if (savedPrefs.isFile) {
+                    savedPrefs.copyTo(scratch, overwrite = true)
+                    context.getSharedPreferences(RESTORE_PREFS_NAME, Context.MODE_PRIVATE).all
+                } else {
+                    null
+                }
+                val foldedDockCount = (restoredPrefs?.get(DOCK_COLUMNS) as? Int)
+                    ?.takeIf { it in 1..20 } ?: grid.numHotseat
+                val gridInfo = DeviceProfileOverrides.DBGridInfo(foldedDockCount, grid.rows, grid.columns)
+                val settingsDb = File(pending, PREFS_DB_FILE_NAME)
+                if (settingsDb.isFile) copyRestoredFile(settingsDb, prefsDbFile(context), isDatabase = true)
+                val datastore = File(pending, PREFS_DATASTORE_FILE_NAME)
+                if (datastore.isFile) copyRestoredFile(datastore, prefsDataStoreFile(context))
+                val prefs = LauncherPrefs.getPrefs(context)
+                val editor = prefs.edit()
+                if (restoredPrefs != null) {
+                    editor.clear()
+                    val launcherPrefs = LauncherPrefs(context.applicationContext)
+                    with(launcherPrefs) {
+                        restoredPrefs.forEach { (key, value) ->
+                            if (value != null) editor.putValue(LauncherPrefs.backedUpItem(key, value), value)
+                        }
+                    }
+                }
+                val restoredLayout = context.getDatabasePath(NATIVE_RESTORED_DB_FILE_NAME)
+                copyRestoredFile(File(pending, LAUNCHER_DB_FILE_NAME), restoredLayout)
+                val restoredGridType = restoredPrefs?.get(DeviceGridState.KEY_GRID_TYPE) as? Int
+                    ?: GridType.GRID_TYPE_ANY
+                val saved = editor
+                    .putInt(WORKSPACE_COLUMNS, gridInfo.numColumns)
+                    .putInt(WORKSPACE_ROWS, gridInfo.numRows)
+                    .putInt(DOCK_COLUMNS, gridInfo.numHotseatColumns)
+                    .putString(DeviceGridState.KEY_WORKSPACE_SIZE, info.gridState.gridSize)
+                    .putInt(DeviceGridState.KEY_HOTSEAT_COUNT, grid.numHotseat)
+                    .putInt(DeviceGridState.KEY_DEVICE_TYPE, grid.deviceType)
+                    .putString(DeviceGridState.KEY_DB_FILE, gridInfo.dbFile)
+                    .putInt(DeviceGridState.KEY_GRID_TYPE, restoredGridType)
+                    .remove(RestoreDbTask.RESTORED_DEVICE_TYPE)
+                    .commit()
+                if (!saved) {
+                    Files.deleteIfExists(restoredLayout.toPath())
+                    error("Unable to save restored grid preferences")
+                }
+                pending.deleteRecursively()
+            } finally {
+                context.deleteSharedPreferences(RESTORE_PREFS_NAME)
+            }
+        }
+
+        private fun copyRestoredFile(source: File, destination: File, isDatabase: Boolean = false) {
+            val parent = checkNotNull(destination.parentFile)
+            parent.mkdirs()
+            val staged = Files.createTempFile(parent.toPath(), "restore-", ".tmp")
+            try {
+                Files.copy(source.toPath(), staged, REPLACE_EXISTING)
+                if (isDatabase) {
+                    for (suffix in listOf("-journal", "-wal", "-shm")) {
+                        Files.deleteIfExists(File(parent, destination.name + suffix).toPath())
+                    }
+                }
+                Files.move(staged, destination.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
+            } finally {
+                Files.deleteIfExists(staged)
+            }
+        }
 
         fun generateBackupFileName(): String {
             val fileName = "Lawnchair_Backup ${SimpleDateFormat.getDateTimeInstance().format(Date())}"

@@ -68,8 +68,23 @@ class LawnchairApp : LauncherApplication() {
     private val isAtleastT = Utilities.ATLEAST_T
     internal var accessibilityService: LawnchairAccessibilityService? = null
     val isVibrateOnIconAnimation: Boolean by unsafeLazy { getSystemUiBoolean("config_vibrateOnIconAnimation", false) }
+    private val isMainProcess by unsafeLazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            Application.getProcessName() == packageName
+        } else {
+            getSystemService(ActivityManager::class.java)?.runningAppProcesses
+                ?.any { it.pid == Process.myPid() && it.processName == packageName } == true
+        }
+    }
 
     override fun onCreate() {
+        if (isMainProcess) {
+            try {
+                LawnchairBackup.installPendingRestore(this)
+            } catch (e: Exception) {
+                Log.e(TAG, "Unable to install native backup", e)
+            }
+        }
         super.onCreate()
         instance = this
         QuickStepContract.sRecentsDisabled = !recentsEnabled
@@ -85,13 +100,6 @@ class LawnchairApp : LauncherApplication() {
      * seconds after start, on a background thread. It is a no-op once written for this install.
      */
     private fun scheduleBaselineProfileInstall() {
-        val isMainProcess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            Application.getProcessName() == packageName
-        } else {
-            // API 26–27 has no Application.getProcessName().
-            getSystemService(ActivityManager::class.java)?.runningAppProcesses
-                ?.any { it.pid == Process.myPid() && it.processName == packageName } == true
-        }
         if (!isMainProcess) return
         Executors.ORDERED_BG_EXECUTOR.handler.postDelayed(
             {

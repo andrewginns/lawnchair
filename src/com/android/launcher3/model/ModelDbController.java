@@ -66,6 +66,10 @@ import com.android.launcher3.util.IntArray;
 import com.android.launcher3.util.SandboxContext;
 import com.android.launcher3.widget.LauncherWidgetHolder;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -74,6 +78,7 @@ import javax.inject.Inject;
 
 import app.lawnchair.LawnchairApp;
 import app.lawnchair.LawnchairAppKt;
+import app.lawnchair.backup.LawnchairBackup;
 
 /**
  * Utility class which maintains an instance of Launcher database and provides utility methods
@@ -126,8 +131,41 @@ public class ModelDbController {
             if (dbFile.isEmpty()) {
                 dbFile = mIdp.dbFile;
             }
+            boolean nativeRestore = installNativeRestore(dbFile);
             mOpenHelper = createDatabaseHelper(false /* forMigration */, dbFile);
-            restoreTask.accept(this);
+            if (nativeRestore) {
+                if (RestoreDbTask.performRestore(mContext, this)) {
+                    clearFlagEmptyDbCreated();
+                } else {
+                    Log.e(TAG, "Unable to sanitize restored native database");
+                }
+            } else {
+                restoreTask.accept(this);
+            }
+        }
+    }
+
+    private boolean installNativeRestore(String dbName) {
+        if (mContext instanceof SandboxContext) {
+            return false;
+        }
+        File staged = mContext.getDatabasePath(LawnchairBackup.NATIVE_RESTORED_DB_FILE_NAME);
+        if (!staged.isFile()) {
+            return false;
+        }
+        File target = mContext.getDatabasePath(dbName);
+        try {
+            // This runs on the first open in the restarted process. Old journals must not be
+            // replayed against the newly restored database.
+            for (String suffix : new String[]{"-journal", "-wal", "-shm"}) {
+                Files.deleteIfExists(new File(target.getPath() + suffix).toPath());
+            }
+            Files.move(staged.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            return true;
+        } catch (IOException e) {
+            Log.e(TAG, "Unable to install restored native database", e);
+            return false;
         }
     }
 
