@@ -177,8 +177,12 @@ jobs:
           adb shell cmd package set-home-activity "$launcher_component"
 
           wait_resumed() {
-            local expected=$1 activity
+            local expected=$1 activity attempt
+            shift
             for attempt in {1..12}; do
+              if (( $# )); then
+                "$@"
+              fi
               activity=$(adb shell dumpsys activity activities | grep 'topResumedActivity') || true
               if [[ "$activity" == *"$expected"* ]]; then
                 echo "$activity"
@@ -190,8 +194,7 @@ jobs:
             return 1
           }
 
-          adb shell input keyevent KEYCODE_HOME
-          wait_resumed "$launcher_component"
+          wait_resumed "$launcher_component" adb shell input keyevent KEYCODE_HOME
 
           adb shell am start -a android.intent.action.ALL_APPS -n "$launcher_component"
           drawer=false
@@ -209,8 +212,8 @@ jobs:
           settings_component="$package/app.lawnchair.ui.preferences.PreferenceActivity"
           adb shell am start -a android.intent.action.VIEW -d lawnchair://settings/home-screen -n "$settings_component"
           wait_resumed "$settings_component"
-          adb shell input keyevent KEYCODE_HOME
-          wait_resumed "$launcher_component"
+          # Preferences can recreate on first launch after the first Home event.
+          wait_resumed "$launcher_component" adb shell input keyevent KEYCODE_HOME
           crashes=$(adb logcat -b crash -d)
           if grep -Fq "Process: $package," <<< "$crashes"; then
             echo "$crashes"
