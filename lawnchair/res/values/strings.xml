@@ -16,6 +16,8 @@
   -->
 
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="action_open_cover_folder">Open folder</string>
+    <string name="folder_cover_description">%1$s, %2$s</string>
     <!-- TODO: Rename all strings to follow CONTRIBUTING.md guidelines -->
     <!--
 

@@ -16,6 +16,7 @@
   -->
 
 <resources>
+    <item type="id" name="action_open_cover_folder" />
     <item type="id" name="font_base_icon" />
     <item type="id" name="font_button" />
     <item type="id" name="font_heading" />

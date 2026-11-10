@@ -16,6 +16,7 @@ import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.model.DatabaseHelper
 import com.android.launcher3.model.DeviceGridState
 import com.android.launcher3.model.ModelDbController
+import com.android.launcher3.model.data.FolderInfo
 import com.android.launcher3.pm.UserCache
 import com.android.launcher3.provider.RestoreDbTask
 import com.android.launcher3.shortcuts.ShortcutKey
@@ -67,6 +68,10 @@ class NovaBackupConverter(
         private const val NOVA_COL_SPAN_Y = "spanY"
         private const val NOVA_COL_ICON = "icon"
         private const val NOVA_COL_APP_WIDGET_PROVIDER = "appWidgetProvider"
+        private const val NOVA_COL_FLAGS = "novaFlags"
+        private const val NOVA_COL_SWIPE_UP = "flingUpIntent"
+        // Nova's swapped tap/swipe custom-cover encoding in the supported backup format.
+        private const val NOVA_SWAPPED_APP_COVER_FLAGS = 39
         private const val NOVA_SMART_FOLDER_MARKER = "FOLDER%3A-"
     }
 
@@ -346,6 +351,14 @@ class NovaBackupConverter(
                  *           X being category ID that are defined in drawer_group table
                  */
                 val rawIntent = getStringOrNull(cursor, NOVA_COL_INTENT)
+                val flagsColumn = cursor.getColumnIndex(NOVA_COL_FLAGS)
+                val cover = if (itemType == Favorites.ITEM_TYPE_FOLDER && (isDesktop || isHotseat) &&
+                    flagsColumn >= 0 && cursor.getInt(flagsColumn) == NOVA_SWAPPED_APP_COVER_FLAGS
+                ) {
+                    parseNovaFolderCover(getStringOrNull(cursor, NOVA_COL_SWIPE_UP))
+                } else {
+                    null
+                }
                 val importedDeepShortcut = if (itemType == Favorites.ITEM_TYPE_DEEP_SHORTCUT) {
                     parseNovaDeepShortcut(rawIntent)?.also { shortcut ->
                         importedDeepShortcuts.getOrPut(shortcut.packageName) { mutableSetOf() }
@@ -354,7 +367,7 @@ class NovaBackupConverter(
                 } else {
                     null
                 }
-                val intent = importedDeepShortcut?.toLauncherIntentUri() ?: rawIntent
+                val intent = cover?.toUri(0) ?: importedDeepShortcut?.toLauncherIntentUri() ?: rawIntent
                 val cellX = cursor.getDouble(cursor.getColumnIndexOrThrow(NOVA_COL_CELL_X)).toInt()
                 val cellY = cursor.getDouble(cursor.getColumnIndexOrThrow(NOVA_COL_CELL_Y)).toInt()
                 val screen = if (isHotseat) cellX else cursor.getInt(cursor.getColumnIndexOrThrow(NOVA_COL_SCREEN))
@@ -374,7 +387,7 @@ class NovaBackupConverter(
                         spanX, spanY, itemType, appWidgetId, icon,
                         appWidgetProvider, modified, restored, profileId,
                         rank, options, appWidgetSource
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, -1, ?, ?, ?, 0, ?, ?, 0, -1)""",
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, -1, ?, ?, ?, 0, ?, ?, ?, -1)""",
                     arrayOf(
                         novaId,
                         title,
@@ -391,10 +404,25 @@ class NovaBackupConverter(
                         now,
                         profileId,
                         rank,
+                        if (cover != null) FolderInfo.FLAG_APP_COVER or FolderInfo.FLAG_MANUAL_FOLDER_NAME else 0,
                     ),
                 )
             }
         }
+    }
+
+    private fun parseNovaFolderCover(value: String?): Intent? {
+        if (value == null) return null
+        val marker = value.indexOf("\$#Intent;")
+        if (marker < 0) return null
+        val source = try {
+            Intent.parseUri(value.substring(marker + 1), 0)
+        } catch (_: URISyntaxException) {
+            return null
+        }
+        if (source.action != Intent.ACTION_MAIN || !source.hasCategory(Intent.CATEGORY_LAUNCHER)) return null
+        val component = source.component ?: return null
+        return Intent.makeMainActivity(component).putExtra(FolderInfo.EXTRA_COVER_LABEL, value.substring(0, marker))
     }
 
     private fun pinImportedDeepShortcuts(importedDeepShortcuts: Map<String, Set<String>>) {

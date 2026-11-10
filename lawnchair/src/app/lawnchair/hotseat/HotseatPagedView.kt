@@ -5,7 +5,7 @@ import android.util.AttributeSet
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.ViewGroup
-import com.android.launcher3.BubbleTextView
+import android.view.View
 import com.android.launcher3.CellLayout
 import com.android.launcher3.DeviceProfile
 import com.android.launcher3.IconGestureTouchTracker
@@ -148,7 +148,7 @@ class HotseatPagedView @JvmOverloads constructor(
         return getPageAt(page)
     }
 
-    fun findIconAtPosition(x: Float, y: Float): BubbleTextView? {
+    fun findIconAtPosition(x: Float, y: Float): View? {
         if (!Utilities.pointInView(this, x, y, 0f)) return null
         val page = findPageAtLocalX(x) ?: return null
         val pageX = x + scrollX - page.left

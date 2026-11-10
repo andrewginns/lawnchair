@@ -28,6 +28,7 @@ import static com.android.launcher3.logger.LauncherAtom.Attribute.MANUAL_LABEL;
 import static com.android.launcher3.logger.LauncherAtom.Attribute.SUGGESTED_LABEL;
 
 import android.content.Context;
+import android.content.Intent;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -57,6 +58,8 @@ public class FolderInfo extends CollectionInfo {
     public static final int FLAG_MULTI_PAGE_ANIMATION = 0x00000004;
 
     public static final int FLAG_MANUAL_FOLDER_NAME = 0x00000008;
+    public static final int FLAG_APP_COVER = 0x00000020;
+    public static final String EXTRA_COVER_LABEL = "app.lawnchair.folder.COVER_LABEL";
 
     /**
      * Different states of folder label.
@@ -83,6 +86,9 @@ public class FolderInfo extends CollectionInfo {
     }
 
     public int options;
+
+    @Nullable public Intent coverIntent;
+    @Nullable public byte[] coverIcon;
 
     public FolderNameInfos suggestedFolderNames;
 
@@ -135,6 +141,10 @@ public class FolderInfo extends CollectionInfo {
     public void onAddToDatabase(@NonNull ContentWriter writer) {
         super.onAddToDatabase(writer);
         writer.put(LauncherSettings.Favorites.OPTIONS, options);
+        if (hasOption(FLAG_APP_COVER)) {
+            writer.put(LauncherSettings.Favorites.INTENT, coverIntent);
+            writer.put(LauncherSettings.Favorites.ICON, coverIcon);
+        }
     }
 
     public boolean hasOption(int optionFlag) {
@@ -231,6 +241,9 @@ public class FolderInfo extends CollectionInfo {
         super.copyFrom(info);
         if (info instanceof FolderInfo fi) {
             contents.addAll(fi.getContents());
+            options = (options & ~FLAG_APP_COVER) | (fi.options & FLAG_APP_COVER);
+            coverIntent = fi.coverIntent;
+            coverIcon = fi.coverIcon;
         }
     }
 

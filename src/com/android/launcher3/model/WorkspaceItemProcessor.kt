@@ -522,6 +522,12 @@ class WorkspaceItemProcessor(
         collection.spanY = 1
         if (collection is FolderInfo) {
             collection.options = c.options
+            if (collection.hasOption(FolderInfo.FLAG_APP_COVER)) {
+                collection.coverIntent = c.parseIntent()?.takeIf {
+                    it.component != null && it.action == Intent.ACTION_MAIN && it.hasCategory(Intent.CATEGORY_LAUNCHER)
+                }
+                collection.coverIcon = c.iconBlob
+            }
         } else {
             // An app pair may be inside another folder, so it needs to preserve rank information.
             collection.rank = c.rank

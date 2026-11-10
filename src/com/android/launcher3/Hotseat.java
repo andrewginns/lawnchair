@@ -445,7 +445,7 @@ public class Hotseat extends FrameLayout implements Insettable {
                 && y >= mQsb.getTop() && y < mQsb.getBottom();
     }
 
-    BubbleTextView findIconAtPosition(float x, float y) {
+    View findIconAtPosition(float x, float y) {
         if (isTouchOnQsb(x, y)) {
             return null;
         }

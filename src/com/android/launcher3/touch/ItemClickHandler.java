@@ -22,7 +22,6 @@ import static com.android.launcher3.LauncherConstants.ActivityCodes.REQUEST_RECO
 import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT;
 import static com.android.launcher3.Utilities.ATLEAST_BAKLAVA;
 import static com.android.launcher3.allapps.AlphabeticalAppsList.PRIVATE_SPACE_PACKAGE;
-import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_FOLDER_OPEN;
 import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_PRIVATE_SPACE_INSTALL_APP_BUTTON_TAP;
 import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_DISABLED_BY_PUBLISHER;
 import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_DISABLED_LOCKED_USER;
@@ -52,7 +51,6 @@ import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherSettings;
 import com.android.launcher3.R;
 import com.android.launcher3.apppairs.AppPairIcon;
-import com.android.launcher3.folder.Folder;
 import com.android.launcher3.folder.FolderIcon;
 import com.android.launcher3.logging.InstanceId;
 import com.android.launcher3.logging.InstanceIdSequence;
@@ -106,7 +104,8 @@ public class ItemClickHandler {
         if (tag instanceof WorkspaceItemInfo) {
             onClickAppShortcut(v, (WorkspaceItemInfo) tag, launcher);
         } else if (tag instanceof FolderInfo) {
-            onClickFolderIcon(v);
+            FolderIcon icon = (FolderIcon) v;
+            if (!icon.launchCover(launcher)) icon.openFolder();
         } else if (tag instanceof AppPairInfo) {
             onClickAppPairIcon(v);
         } else if (tag instanceof AppInfo) {
@@ -129,21 +128,6 @@ public class ItemClickHandler {
             }
         } else if (tag instanceof ItemClickProxy) {
             ((ItemClickProxy) tag).onItemClicked(v);
-        }
-    }
-
-    /**
-     * Event handler for a folder icon click.
-     *
-     * @param v The view that was clicked. Must be an instance of {@link FolderIcon}.
-     */
-    private static void onClickFolderIcon(View v) {
-        Folder folder = ((FolderIcon) v).getFolder();
-        if (!folder.isOpen() && !folder.isDestroyed()) {
-            // Open the requested folder
-            folder.animateOpen();
-            StatsLogManager.newInstance(v.getContext()).logger().withItemInfo(folder.mInfo)
-                    .log(LAUNCHER_FOLDER_OPEN);
         }
     }
 

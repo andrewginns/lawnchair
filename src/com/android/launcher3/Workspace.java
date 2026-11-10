@@ -1274,8 +1274,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     // Lawnchair: Icon swipe gesture feature
     public boolean isTouchOnIconWithSwipeGesture(float x, float y, boolean vertical) {
         boolean hasConfiguredIconSwipeGesture = false;
-        BubbleTextView touchedIcon = findIconAtPosition(x, y);
-        if (touchedIcon != null) {
+        if (findIconAtPosition(x, y) instanceof BubbleTextView touchedIcon) {
             if (vertical) {
                 hasConfiguredIconSwipeGesture = touchedIcon.hasConfiguredVerticalIconSwipeGesture();
             } else {
@@ -1291,15 +1290,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
      */
     public boolean isTouchOnIconWithSwipeGestureInDirection(
             float x, float y, float diffX, float diffY) {
-        BubbleTextView touchedIcon = findIconAtPosition(x, y);
-        if (touchedIcon == null) {
-            return false;
-        }
-        return touchedIcon.hasConfiguredIconSwipeGestureForDirection(diffX, diffY);
+        return findIconAtPosition(x, y) instanceof BubbleTextView touchedIcon
+                && touchedIcon.hasConfiguredIconSwipeGestureForDirection(diffX, diffY);
     }
 
     // Lawnchair: Icon swipe gesture feature
-    BubbleTextView findIconAtPosition(float x, float y) {
+    View findIconAtPosition(float x, float y) {
         for (int i = getChildCount() - 1; i >= 0; i--) {
             View child = getChildAt(i);
             if (!(child instanceof CellLayout cellLayout)) {
@@ -1310,7 +1306,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             if (!Utilities.pointInView(cellLayout, localX, localY, 0)) {
                 continue;
             }
-            BubbleTextView foundView = findIconInCellLayout(cellLayout, localX, localY);
+            View foundView = findIconInCellLayout(cellLayout, localX, localY);
             if (foundView != null) {
                 return foundView;
             }
@@ -1319,21 +1315,22 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     // Lawnchair: Icon swipe gesture feature
-    public static BubbleTextView findIconInCellLayout(CellLayout cellLayout, float x, float y) {
+    public static View findIconInCellLayout(CellLayout cellLayout, float x, float y) {
         ShortcutAndWidgetContainer container = cellLayout.getShortcutsAndWidgets();
         float containerX = x - container.getLeft();
         float containerY = y - container.getTop();
         for (int i = container.getChildCount() - 1; i >= 0; i--) {
             View child = container.getChildAt(i);
-            if (!(child instanceof BubbleTextView bubbleTextView)
-                    || child.getVisibility() != VISIBLE) {
+            if (child.getVisibility() != VISIBLE) {
                 continue;
             }
             float childX = containerX - child.getX();
             float childY = containerY - child.getY();
-            if (Utilities.pointInView(child, childX, childY, 0)
-                    && !bubbleTextView.shouldIgnoreTouchDown(childX, childY)) {
-                return bubbleTextView;
+            if (!Utilities.pointInView(child, childX, childY, 0)) continue;
+            if ((child instanceof BubbleTextView icon && !icon.shouldIgnoreTouchDown(childX, childY))
+                    || (child instanceof FolderIcon folder && folder.canSwipeOpenCover()
+                    && !folder.shouldIgnoreTouchDown(childX, childY))) {
+                return child;
             }
         }
         return null;

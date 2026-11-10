@@ -17,7 +17,10 @@ package com.android.launcher3;
 
 import android.content.Context;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewConfiguration;
+
+import com.android.launcher3.folder.FolderIcon;
 
 /**
  * Tracks a touch that starts on an icon and determines whether its current direction has an icon
@@ -26,7 +29,7 @@ import android.view.ViewConfiguration;
 public final class IconGestureTouchTracker {
 
     private final int mTouchSlop;
-    private BubbleTextView mTouchedIcon;
+    private View mTouchedIcon;
     private int mInitialPointerId = MotionEvent.INVALID_POINTER_ID;
     private float mDownX;
     private float mDownY;
@@ -41,7 +44,7 @@ public final class IconGestureTouchTracker {
 
     /** Finds the touched icon for an event in drag-layer coordinates. */
     public void onDragLayerTouchDown(MotionEvent ev, Launcher launcher) {
-        BubbleTextView icon = null;
+        View icon = null;
         if (launcher.getDragLayer() != null) {
             float[] coord = new float[]{ev.getX(), ev.getY()};
             Hotseat hotseat = launcher.getHotseat();
@@ -61,7 +64,7 @@ public final class IconGestureTouchTracker {
     }
 
     /** Records the touched icon when the caller already has local hit-test coordinates. */
-    public void onTouchDown(MotionEvent ev, BubbleTextView icon) {
+    public void onTouchDown(MotionEvent ev, View icon) {
         mTouchedIcon = icon;
         mInitialPointerId = ev.getPointerId(0);
         mDownX = ev.getX();
@@ -80,8 +83,14 @@ public final class IconGestureTouchTracker {
         }
         float diffX = ev.getX(pointerIndex) - mDownX;
         float diffY = ev.getY(pointerIndex) - mDownY;
-        return Math.max(Math.abs(diffX), Math.abs(diffY)) >= mTouchSlop
-                && mTouchedIcon.hasConfiguredIconSwipeGestureForDirection(diffX, diffY);
+        if (Math.max(Math.abs(diffX), Math.abs(diffY)) < mTouchSlop) {
+            return false;
+        }
+        if (mTouchedIcon instanceof BubbleTextView icon) {
+            return icon.hasConfiguredIconSwipeGestureForDirection(diffX, diffY);
+        }
+        return mTouchedIcon instanceof FolderIcon folder && folder.canSwipeOpenCover()
+                && diffY < 0 && -diffY >= Math.abs(diffX);
     }
 
     /** Clears the touch state after the gesture finishes or is cancelled. */

@@ -26,25 +26,35 @@ import static com.android.launcher3.folder.PreviewItemManager.INITIAL_ITEM_ANIMA
 import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_FOLDER_AUTO_LABELED;
 import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_FOLDER_AUTO_LABELING_SKIPPED_EMPTY_PRIMARY;
 import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_FOLDER_AUTO_LABELING_SKIPPED_EMPTY_SUGGESTIONS;
+import static com.android.launcher3.logging.StatsLogManager.LauncherEvent.LAUNCHER_FOLDER_OPEN;
 import static com.android.launcher3.model.data.FolderInfo.willAcceptItemType;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ObjectAnimator;
 import android.content.Context;
+import android.content.Intent;
+import android.content.pm.LauncherActivityInfo;
+import android.content.pm.LauncherApps;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.os.Bundle;
 import android.os.Looper;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.util.Property;
+import android.view.GestureDetector;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewDebug;
 import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
@@ -59,6 +69,7 @@ import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.DropTarget.DragObject;
 import com.android.launcher3.Launcher;
 import com.android.launcher3.LauncherSettings;
+import com.android.launcher3.LauncherState;
 import com.android.launcher3.OnAlarmListener;
 import com.android.launcher3.R;
 import com.android.launcher3.Reorderable;
@@ -104,6 +115,10 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
     public FolderInfo mInfo;
 
     private CheckLongPressHelper mLongPressHelper;
+    private Drawable mCoverIcon;
+    private CharSequence mCoverLabel;
+    private GestureDetector mCoverSwipeDetector;
+    private boolean mCoverSwipeHasMultiplePointers;
 
     static final int DROP_IN_ANIMATION_DURATION = 400;
 
@@ -207,7 +222,6 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
         icon.setClipToPadding(false);
         icon.mFolderName = icon.findViewById(R.id.folder_icon_name);
-        icon.mFolderName.setText(folderInfo.title);
         icon.mFolderName.setCompoundDrawablePadding(0);
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) icon.mFolderName.getLayoutParams();
         if (folderInfo.container == ItemInfo.NO_ID) {
@@ -223,7 +237,8 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         icon.mActivity = activity;
         icon.mDotRenderer = grid.mDotRendererWorkSpace;
 
-        icon.setContentDescription(icon.getAccessiblityTitle(folderInfo.title));
+        icon.bindCover();
+        icon.updateCoverLabel(folderInfo.title);
         icon.updateDotInfo();
 
         icon.setAccessibilityDelegate(activity.getAccessibilityDelegate());
@@ -257,6 +272,112 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
     public Folder getFolder() {
         return mFolder;
+    }
+
+    private void bindCover() {
+        if (mInfo.coverIntent == null) return;
+        mCoverLabel = mInfo.coverIntent.getStringExtra(FolderInfo.EXTRA_COVER_LABEL);
+        byte[] artwork = mInfo.coverIcon;
+        if (artwork != null) {
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(artwork, 0, artwork.length, options);
+            if (options.outWidth > 0 && options.outHeight > 0
+                    && options.outWidth <= 1024 && options.outHeight <= 1024) {
+                var bitmap = BitmapFactory.decodeByteArray(artwork, 0, artwork.length);
+                if (bitmap != null) mCoverIcon = new BitmapDrawable(getResources(), bitmap);
+            }
+        }
+        if (mCoverIcon == null || mCoverLabel == null) {
+            LauncherActivityInfo activity = resolveCoverActivity();
+            if (activity != null) {
+                if (mCoverIcon == null) mCoverIcon = activity.getBadgedIcon(0);
+                if (mCoverLabel == null) mCoverLabel = activity.getLabel();
+            }
+        }
+
+        int distance = 2 * ViewConfiguration.get(getContext()).getScaledTouchSlop();
+        mCoverSwipeDetector = new GestureDetector(getContext(),
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override
+                    public boolean onDown(MotionEvent event) {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onFling(MotionEvent down, MotionEvent up, float vx, float vy) {
+                        if (down == null || mLongPressHelper.hasPerformedLongPress()) return false;
+                        float rise = down.getY() - up.getY();
+                        return rise >= distance && rise >= Math.abs(up.getX() - down.getX());
+                    }
+                });
+    }
+
+    @Nullable
+    private LauncherActivityInfo resolveCoverActivity() {
+        LauncherApps apps = getContext().getSystemService(LauncherApps.class);
+        if (apps == null || mInfo.coverIntent == null || mInfo.coverIntent.getComponent() == null) {
+            return null;
+        }
+        try {
+            String packageName = mInfo.coverIntent.getComponent().getPackageName();
+            List<LauncherActivityInfo> activities = apps.getActivityList(packageName, mInfo.user);
+            for (LauncherActivityInfo activity : activities) {
+                if (activity.getComponentName().equals(mInfo.coverIntent.getComponent())) {
+                    return activity;
+                }
+            }
+            return activities.isEmpty() ? null : activities.get(0);
+        } catch (SecurityException e) {
+            return null;
+        }
+    }
+
+    private void updateCoverLabel(CharSequence title) {
+        mFolderName.setText(mCoverLabel == null ? title : mCoverLabel);
+        CharSequence folderDescription = getAccessiblityTitle(title);
+        setContentDescription(mCoverLabel == null ? folderDescription
+                : getContext().getString(R.string.folder_cover_description, mCoverLabel,
+                        folderDescription));
+    }
+
+    public boolean canSwipeOpenCover() {
+        return mCoverSwipeDetector != null && mFolder != null && !mFolder.isDestroyed()
+                && mActivity instanceof Launcher launcher && launcher.isInState(LauncherState.NORMAL);
+    }
+
+    public boolean launchCover(Launcher launcher) {
+        if (!canSwipeOpenCover()) return false;
+        LauncherActivityInfo activity = resolveCoverActivity();
+        if (activity == null) return false;
+        WorkspaceItemInfo cover = new WorkspaceItemInfo();
+        cover.itemType = LauncherSettings.Favorites.ITEM_TYPE_APPLICATION;
+        cover.user = mInfo.user;
+        cover.title = activity.getLabel();
+        cover.intent = Intent.makeMainActivity(activity.getComponentName());
+        return launcher.startActivitySafely(this, cover.intent, cover) != null;
+    }
+
+    public boolean openFolder() {
+        if (mFolder == null || mFolder.isOpen() || mFolder.isDestroyed()) return false;
+        mFolder.animateOpen();
+        StatsLogManager.newInstance(getContext()).logger().withItemInfo(mInfo).log(LAUNCHER_FOLDER_OPEN);
+        return true;
+    }
+
+    @Override
+    public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+        super.onInitializeAccessibilityNodeInfo(info);
+        if (canSwipeOpenCover()) {
+            info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.action_open_cover_folder,
+                    getContext().getString(R.string.action_open_cover_folder)));
+        }
+    }
+
+    @Override
+    public boolean performAccessibilityAction(int action, Bundle arguments) {
+        if (action == R.id.action_open_cover_folder && canSwipeOpenCover()) return openFolder();
+        return super.performAccessibilityAction(action, arguments);
     }
 
     private void setFolder(Folder folder) {
@@ -598,6 +719,15 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
         if (!mBackgroundIsVisible) return;
 
+        if (mCoverIcon != null && !mAnimating && !mBackground.drawingDelegated()) {
+            int size = mActivity.getDeviceProfile().iconSizePx;
+            int left = (getWidth() - size) / 2;
+            int top = getPaddingTop();
+            mCoverIcon.setBounds(left, top, left + size, top + size);
+            mCoverIcon.draw(canvas);
+            return;
+        }
+
         mPreviewItemManager.recomputePreviewDrawingParams();
 
         if (!mBackground.drawingDelegated()) {
@@ -690,15 +820,14 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
     public void onItemsChanged(boolean animate) {
         updatePreviewItems(false);
         updateDotInfo();
-        setContentDescription(getAccessiblityTitle(mInfo.title));
+        updateCoverLabel(mInfo.title);
         updatePreviewItems(animate);
         invalidate();
         requestLayout();
     }
 
     public void onTitleChanged(CharSequence title) {
-        mFolderName.setText(title);
-        setContentDescription(getAccessiblityTitle(title));
+        updateCoverLabel(title);
     }
 
     @Override
@@ -706,6 +835,21 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         if (event.getAction() == MotionEvent.ACTION_DOWN
                 && shouldIgnoreTouchDown(event.getX(), event.getY())) {
             return false;
+        }
+
+        if (canSwipeOpenCover()) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) mCoverSwipeHasMultiplePointers = false;
+            if (!mCoverSwipeHasMultiplePointers && action == MotionEvent.ACTION_POINTER_DOWN) {
+                mCoverSwipeHasMultiplePointers = true;
+                cancelCoverTouch(event);
+            }
+            if (mCoverSwipeHasMultiplePointers) return true;
+            if (mCoverSwipeDetector.onTouchEvent(event) && action == MotionEvent.ACTION_UP) {
+                cancelCoverTouch(event);
+                openFolder();
+                return true;
+            }
         }
 
         // Call the superclass onTouchEvent first, because sometimes it changes the state to
@@ -716,10 +860,19 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
         return true;
     }
 
+    private void cancelCoverTouch(MotionEvent event) {
+        MotionEvent cancel = MotionEvent.obtain(event);
+        cancel.setAction(MotionEvent.ACTION_CANCEL);
+        mCoverSwipeDetector.onTouchEvent(cancel);
+        super.onTouchEvent(cancel);
+        mLongPressHelper.onTouchEvent(cancel);
+        cancel.recycle();
+    }
+
     /**
      * Returns true if the touch down at the provided position be ignored
      */
-    protected boolean shouldIgnoreTouchDown(float x, float y) {
+    public boolean shouldIgnoreTouchDown(float x, float y) {
         mTouchArea.set(getPaddingLeft(), getPaddingTop(), getWidth() - getPaddingRight(),
                 getHeight() - getPaddingBottom());
         return !mTouchArea.contains((int) x, (int) y);
