@@ -32,8 +32,7 @@ abstract class DirectionalGestureListener(ctx: Context?) : OnTouchListener {
 
     inner class GestureListener : SimpleOnGestureListener() {
 
-        private fun shouldReactToSwipe(diff: Float, velocity: Float, distanceThreshold: Int = SWIPE_THRESHOLD): Boolean =
-            abs(diff) > distanceThreshold && abs(velocity) > SWIPE_VELOCITY_THRESHOLD
+        private fun shouldReactToSwipe(diff: Float, velocity: Float, distanceThreshold: Int = SWIPE_THRESHOLD): Boolean = abs(diff) > distanceThreshold && abs(velocity) > SWIPE_VELOCITY_THRESHOLD
 
         override fun onScroll(
             e1: MotionEvent?,

@@ -70,6 +70,7 @@ class NovaBackupConverter(
         private const val NOVA_COL_APP_WIDGET_PROVIDER = "appWidgetProvider"
         private const val NOVA_COL_FLAGS = "novaFlags"
         private const val NOVA_COL_SWIPE_UP = "flingUpIntent"
+
         // Nova's swapped tap/swipe custom-cover encoding in the supported backup format.
         private const val NOVA_SWAPPED_APP_COVER_FLAGS = 39
         private const val NOVA_SMART_FOLDER_MARKER = "FOLDER%3A-"

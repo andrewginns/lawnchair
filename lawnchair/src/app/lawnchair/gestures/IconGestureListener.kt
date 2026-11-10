@@ -29,6 +29,7 @@ class IconGestureListener(
     private val context get() = view.context
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+
     // Compact docks may have less than the normal swipe distance below the icon.
     override val swipeDownDistanceThreshold: Int
         get() = if ((view.tag as? ItemInfo)?.isInHotseat == true) 2 * touchSlop else super.swipeDownDistanceThreshold
