@@ -56,6 +56,13 @@ public class CellLayoutLayoutParams extends ViewGroup.MarginLayoutParams {
     @ViewDebug.ExportedProperty
     public int cellVSpan;
 
+    public boolean cellXHalf;
+    public boolean cellYHalf;
+
+    public boolean isOnSubgrid() {
+        return cellXHalf || cellYHalf;
+    }
+
     /**
      * Indicates whether the item will set its x, y, width and height parameters freely,
      * or whether these will be computed based on cellX, cellY, cellHSpan and cellVSpan.
@@ -95,6 +102,8 @@ public class CellLayoutLayoutParams extends ViewGroup.MarginLayoutParams {
         this.mCellY = source.getCellY();
         this.cellHSpan = source.cellHSpan;
         this.cellVSpan = source.cellVSpan;
+        this.cellXHalf = source.cellXHalf;
+        this.cellYHalf = source.cellYHalf;
         this.mTmpCellX = source.getTmpCellX();
         this.mTmpCellY = source.getTmpCellY();
         this.useTmpCoords = source.useTmpCoords;
@@ -148,6 +157,13 @@ public class CellLayoutLayoutParams extends ViewGroup.MarginLayoutParams {
             height = Math.round(myCellHeight) - topMargin - bottomMargin;
             x = leftMargin + (myCellX * cellWidth) + (myCellX * borderSpace.x);
             y = topMargin + (myCellY * cellHeight) + (myCellY * borderSpace.y);
+            if (cellXHalf) {
+                int halfPitch = Math.round((cellWidth + borderSpace.x) / 2f);
+                x += invertHorizontally ? -halfPitch : halfPitch;
+            }
+            if (cellYHalf) {
+                y += Math.round((cellHeight + borderSpace.y) / 2f);
+            }
 
             if (inset != null) {
                 x += inset.left;

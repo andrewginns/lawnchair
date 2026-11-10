@@ -85,6 +85,7 @@ import com.google.android.msdl.data.model.MSDLToken;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Stack;
@@ -125,6 +126,7 @@ public class CellLayout extends ViewGroup {
     @Thunk final Rect mTempOnDrawCellToRect = new Rect();
 
     protected GridOccupancy mOccupied;
+    private WeakReference<View> mUnoccupiedSubgridView;
     public GridOccupancy mTmpOccupied;
 
     private OnTouchListener mInterceptTouchListener;
@@ -662,6 +664,7 @@ public class CellLayout extends ViewGroup {
                 cellToRect(params.getCellX(), params.getCellY(), params.cellHSpan, params.cellVSpan,
                         mTempOnDrawCellToRect);
                 mVisualizeGridRect.set(mTempOnDrawCellToRect);
+                mVisualizeGridRect.offset(subgridOffsetX(params), subgridOffsetY(params));
                 mVisualizeGridRect.inset(paddingX, paddingY);
 
                 mVisualizeGridPaint.setAlpha(255);
@@ -944,6 +947,76 @@ public class CellLayout extends ViewGroup {
         return (float) Math.hypot(x - mTmpPoint[0], y - mTmpPoint[1]);
     }
 
+    record SubgridPosition(int x, int y, boolean halfX, boolean halfY) { }
+
+    @Nullable
+    SubgridPosition findSubgridDrop(float x, float y, DropTarget.DragObject drag, View ignore) {
+        if (mContainerType != WORKSPACE || this instanceof MultipageCellLayout
+                || mCellWidth <= 0 || mCellHeight <= 0
+                || drag.dragInfo.spanX != 1 || drag.dragInfo.spanY != 1
+                || drag.originalView == null
+                || drag.originalView.getViewType() != DRAGGABLE_ICON) {
+            return null;
+        }
+        int pitchX = mCellWidth + mBorderSpace.x;
+        int pitchY = mCellHeight + mBorderSpace.y;
+        cellToCenterPoint(0, 0, mTmpPoint);
+        // The drag center is the center of the glyph, which sits above the label.
+        DeviceProfile dp = mActivity.getDeviceProfile();
+        int cellPaddingY = dp.cellYPaddingPx >= 0 ? dp.cellYPaddingPx
+                : Math.max(0, (mCellHeight - mShortcutsAndWidgets.getCellContentHeight()) / 2);
+        int iconY = mTmpPoint[1] - mCellHeight / 2 + cellPaddingY + dp.iconSizePx / 2;
+        int halfX = Math.round((x - mTmpPoint[0]) * 2 / pitchX);
+        int halfY = Math.round((y - iconY) * 2 / pitchY);
+        if (mShortcutsAndWidgets.invertLayoutHorizontally()) {
+            halfX = (mCountX - 1) * 2 - halfX;
+        }
+        if (halfX < 0 || halfY < 0 || halfX > (mCountX - 1) * 2
+                || halfY > (mCountY - 1) * 2 || ((halfX | halfY) & 1) == 0) {
+            return null;
+        }
+        for (int i = 0; i < mShortcutsAndWidgets.getChildCount(); i++) {
+            View child = mShortcutsAndWidgets.getChildAt(i);
+            if (child == ignore) continue;
+            CellLayoutLayoutParams lp = (CellLayoutLayoutParams) child.getLayoutParams();
+            int left = lp.getCellX() * 2 + (lp.cellXHalf ? 1 : 0);
+            int top = lp.getCellY() * 2 + (lp.cellYHalf ? 1 : 0);
+            if (halfX + 2 > left && halfX < left + lp.cellHSpan * 2
+                    && halfY + 2 > top && halfY < top + lp.cellVSpan * 2) {
+                return null;
+            }
+        }
+        return new SubgridPosition(halfX / 2, halfY / 2, (halfX & 1) != 0, (halfY & 1) != 0);
+    }
+
+    private int subgridOffsetX(CellLayoutLayoutParams lp) {
+        return lp.cellXHalf ? Math.round((mCellWidth + mBorderSpace.x) / 2f)
+                * (mShortcutsAndWidgets.invertLayoutHorizontally() ? -1 : 1) : 0;
+    }
+
+    private int subgridOffsetY(CellLayoutLayoutParams lp) {
+        return lp.cellYHalf ? Math.round((mCellHeight + mBorderSpace.y) / 2f) : 0;
+    }
+
+    @Nullable
+    int[] findSubgridFolderTarget(float x, float y, int[] result) {
+        if (result == null) result = new int[2];
+        for (int i = 0; i < mShortcutsAndWidgets.getChildCount(); i++) {
+            View child = mShortcutsAndWidgets.getChildAt(i);
+            if (!(child instanceof DraggableView dragView)
+                    || dragView.getViewType() != DRAGGABLE_ICON) continue;
+            CellLayoutLayoutParams lp = (CellLayoutLayoutParams) child.getLayoutParams();
+            if (!lp.isOnSubgrid()) continue;
+            result[0] = lp.getCellX();
+            result[1] = lp.getCellY();
+            if (getDistanceFromWorkspaceCellVisualCenter(x, y, result)
+                    <= getFolderCreationRadius(result)) {
+                return result;
+            }
+        }
+        return null;
+    }
+
     private void getWorkspaceCellVisualCenter(int cellX, int cellY, int[] outPoint) {
         View child = getChildAt(cellX, cellY);
         if (child instanceof DraggableView) {
@@ -952,8 +1025,9 @@ public class CellLayout extends ViewGroup {
                 cellToPoint(cellX, cellY, outPoint);
                 draggableChild.getWorkspaceVisualDragBounds(mTempRect);
                 mTempRect.offset(outPoint[0], outPoint[1]);
-                outPoint[0] = mTempRect.centerX();
-                outPoint[1] = mTempRect.centerY();
+                CellLayoutLayoutParams lp = (CellLayoutLayoutParams) child.getLayoutParams();
+                outPoint[0] = mTempRect.centerX() + subgridOffsetX(lp);
+                outPoint[1] = mTempRect.centerY() + subgridOffsetY(lp);
                 return;
             }
         }
@@ -1194,8 +1268,15 @@ public class CellLayout extends ViewGroup {
 
     void visualizeDropLocation(int cellX, int cellY, int spanX, int spanY,
                                DropTarget.DragObject dragObject) {
+        visualizeDropLocation(cellX, cellY, spanX, spanY, false, false, dragObject);
+    }
+
+    void visualizeDropLocation(int cellX, int cellY, int spanX, int spanY,
+            boolean halfX, boolean halfY, DropTarget.DragObject dragObject) {
+        CellLayoutLayoutParams oldOutline = mDragOutlines[mDragOutlineCurrent];
         if (mDragCell[0] != cellX || mDragCell[1] != cellY || mDragCellSpan[0] != spanX
-                || mDragCellSpan[1] != spanY) {
+                || mDragCellSpan[1] != spanY || oldOutline.cellXHalf != halfX
+                || oldOutline.cellYHalf != halfY) {
             determineIfDragHapticsPlay();
             if (mPlayDragHaptics && Flags.msdlFeedback()) {
                 mMSDLPlayerWrapper.playToken(MSDLToken.DRAG_INDICATOR_DISCRETE);
@@ -1214,6 +1295,8 @@ public class CellLayout extends ViewGroup {
             cell.setCellY(cellY);
             cell.cellHSpan = spanX;
             cell.cellVSpan = spanY;
+            cell.cellXHalf = halfX;
+            cell.cellYHalf = halfY;
 
             mDragOutlineAnims[mDragOutlineCurrent].animateIn();
             invalidate();
@@ -1312,6 +1395,7 @@ public class CellLayout extends ViewGroup {
 
         final int countX = mCountX;
         final int countY = mCountY;
+        final GridOccupancy occupied = ignoreOccupied ? null : getOccupied();
 
         if (minSpanX <= 0 || minSpanY <= 0 || spanX <= 0 || spanY <= 0 ||
                 spanX < minSpanX || spanY < minSpanY) {
@@ -1327,7 +1411,7 @@ public class CellLayout extends ViewGroup {
                     // First, let's see if this thing fits anywhere
                     for (int i = 0; i < minSpanX; i++) {
                         for (int j = 0; j < minSpanY; j++) {
-                            if (mOccupied.cells[x + i][y + j]) {
+                            if (occupied.cells[x + i][y + j]) {
                                 continue inner;
                             }
                         }
@@ -1344,7 +1428,7 @@ public class CellLayout extends ViewGroup {
                     while (!(hitMaxX && hitMaxY)) {
                         if (incX && !hitMaxX) {
                             for (int j = 0; j < ySize; j++) {
-                                if (x + xSize > countX -1 || mOccupied.cells[x + xSize][y + j]) {
+                                if (x + xSize > countX -1 || occupied.cells[x + xSize][y + j]) {
                                     // We can't move out horizontally
                                     hitMaxX = true;
                                 }
@@ -1354,7 +1438,7 @@ public class CellLayout extends ViewGroup {
                             }
                         } else if (!hitMaxY) {
                             for (int i = 0; i < xSize; i++) {
-                                if (y + ySize > countY - 1 || mOccupied.cells[x + i][y + ySize]) {
+                                if (y + ySize > countY - 1 || occupied.cells[x + i][y + ySize]) {
                                     // We can't move out vertically
                                     hitMaxY = true;
                                 }
@@ -1408,7 +1492,44 @@ public class CellLayout extends ViewGroup {
     }
 
     public GridOccupancy getOccupied() {
-        return mOccupied;
+        if (this instanceof MultipageCellLayout multipage && multipage.isSeamWasAdded()) {
+            // The simulated grid already contains the half-cell coverage at seam-adjusted columns.
+            return mOccupied;
+        }
+        GridOccupancy occupied = mOccupied;
+        for (int i = 0; i < mShortcutsAndWidgets.getChildCount(); i++) {
+            View child = mShortcutsAndWidgets.getChildAt(i);
+            CellLayoutLayoutParams lp = (CellLayoutLayoutParams) child.getLayoutParams();
+            if (isSubgridViewUnoccupied(child) || !lp.isOnSubgrid()) continue;
+            if (occupied == mOccupied) {
+                occupied = new GridOccupancy(mCountX, mCountY);
+                mOccupied.copyTo(occupied);
+            }
+            // Whole-cell callers must treat each cell touched by a fractional item as occupied.
+            occupied.markCells(lp.getCellX(), lp.getCellY(),
+                    lp.cellHSpan + (lp.cellXHalf ? 1 : 0),
+                    lp.cellVSpan + (lp.cellYHalf ? 1 : 0), true);
+        }
+        return occupied;
+    }
+
+    public boolean isSubgridViewUnoccupied(View view) {
+        return mUnoccupiedSubgridView != null && view == mUnoccupiedSubgridView.get();
+    }
+
+    private boolean intersectsSubgridItem(int x, int y, int spanX, int spanY) {
+        for (int i = 0; i < mShortcutsAndWidgets.getChildCount(); i++) {
+            View child = mShortcutsAndWidgets.getChildAt(i);
+            CellLayoutLayoutParams lp = (CellLayoutLayoutParams) child.getLayoutParams();
+            if (!lp.isOnSubgrid() || isSubgridViewUnoccupied(child)) continue;
+            if (x + spanX > lp.getCellX()
+                    && x < lp.getCellX() + lp.cellHSpan + (lp.cellXHalf ? 1 : 0)
+                    && y + spanY > lp.getCellY()
+                    && y < lp.getCellY() + lp.cellVSpan + (lp.cellYHalf ? 1 : 0)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void copySolutionToTempState(ItemConfiguration solution, View dragView) {
@@ -1541,8 +1662,9 @@ public class CellLayout extends ViewGroup {
             if (child == dragView) continue;
             CellLayoutLayoutParams
                     lp = (CellLayoutLayoutParams) child.getLayoutParams();
-            r1.set(lp.getCellX(), lp.getCellY(), lp.getCellX() + lp.cellHSpan,
-                    lp.getCellY() + lp.cellVSpan);
+            r1.set(lp.getCellX(), lp.getCellY(), lp.getCellX() + lp.cellHSpan
+                    + (lp.cellXHalf ? 1 : 0), lp.getCellY() + lp.cellVSpan
+                    + (lp.cellYHalf ? 1 : 0));
             if (Rect.intersects(region, r1)) {
                 isOverlapping = true;
                 boundingRect.union(r1);
@@ -1581,6 +1703,9 @@ public class CellLayout extends ViewGroup {
 
     boolean createAreaForResize(int cellX, int cellY, int spanX, int spanY,
                                 View dragView, int[] direction, boolean commit) {
+        if (((CellLayoutLayoutParams) dragView.getLayoutParams()).isOnSubgrid()) {
+            return false;
+        }
         int[] pixelXY = new int[2];
         regionToCenterPoint(cellX, cellY, spanX, spanY, pixelXY);
 
@@ -1792,7 +1917,7 @@ public class CellLayout extends ViewGroup {
         if (cellXY == null) {
             cellXY = new int[2];
         }
-        return mOccupied.findVacantCell(cellXY, spanX, spanY);
+        return getOccupied().findVacantCell(cellXY, spanX, spanY);
     }
 
     /**
@@ -1878,6 +2003,9 @@ public class CellLayout extends ViewGroup {
     }
 
     public void markCellsAsOccupiedForView(View view) {
+        if (isSubgridViewUnoccupied(view)) {
+            mUnoccupiedSubgridView = null;
+        }
         if (view instanceof LauncherAppWidgetHostView
                 && view.getTag() instanceof LauncherAppWidgetInfo info) {
             CellPos pos = mActivity.getCellPosMapper().mapModelToPresenter(info);
@@ -1891,6 +2019,10 @@ public class CellLayout extends ViewGroup {
     }
 
     public void markCellsAsUnoccupiedForView(View view) {
+        if (view != null && view.getParent() == mShortcutsAndWidgets
+                && ((CellLayoutLayoutParams) view.getLayoutParams()).isOnSubgrid()) {
+            mUnoccupiedSubgridView = new WeakReference<>(view);
+        }
         if (view instanceof LauncherAppWidgetHostView
                 && view.getTag() instanceof LauncherAppWidgetInfo info) {
             CellPos pos = mActivity.getCellPosMapper().mapModelToPresenter(info);
@@ -1942,7 +2074,8 @@ public class CellLayout extends ViewGroup {
 
     public boolean isOccupied(int x, int y) {
         if (x >= 0 && x < mCountX && y >= 0 && y < mCountY) {
-            return mOccupied.cells[x][y] && !PreferenceCacheExtensionsKt.firstCached(pref.getAllowWidgetOverlap());
+            return PreferenceCacheExtensionsKt.firstCached(pref.getAllowWidgetOverlap())
+                    ? intersectsSubgridItem(x, y, 1, 1) : getOccupied().cells[x][y];
         }
         if (BuildConfigs.IS_STUDIO_BUILD) {
             throw new RuntimeException("Position exceeds the bound of this CellLayout");
@@ -2020,12 +2153,14 @@ public class CellLayout extends ViewGroup {
      */
     public GridOccupancy cloneGridOccupancy() {
         GridOccupancy occupancy = new GridOccupancy(mCountX, mCountY);
-        mOccupied.copyTo(occupancy);
+        getOccupied().copyTo(occupancy);
         return occupancy;
     }
 
     public boolean isRegionVacant(int x, int y, int spanX, int spanY) {
-        return mOccupied.isRegionVacant(x, y, spanX, spanY) || PreferenceCacheExtensionsKt.firstCached(pref.getAllowWidgetOverlap());
+        return getOccupied().isRegionVacant(x, y, spanX, spanY)
+                || (PreferenceCacheExtensionsKt.firstCached(pref.getAllowWidgetOverlap())
+                && !intersectsSubgridItem(x, y, spanX, spanY));
     }
 
     public void setSpaceBetweenCellLayoutsPx(@Px int spaceBetweenCellLayoutsPx) {

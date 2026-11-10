@@ -100,7 +100,7 @@ public class MulticellReorderAlgorithm extends ReorderAlgorithm {
         if (mcl.isSeamWasAdded()) {
             return f.get();
         }
-        GridOccupancy auxGrid = mcl.getOccupied();
+        GridOccupancy auxGrid = mcl.getBaseOccupied();
         addSeam();
         T res = f.get();
         removeSeam();
@@ -113,10 +113,12 @@ public class MulticellReorderAlgorithm extends ReorderAlgorithm {
         GridOccupancy grid = new GridOccupancy(mCellLayout.getCountX(), mCellLayout.getCountY());
         for (int i = 0; i < shortcutAndWidgets.getChildCount(); i++) {
             View view = shortcutAndWidgets.getChildAt(i);
+            if (mCellLayout.isSubgridViewUnoccupied(view)) continue;
             CellLayoutLayoutParams lp = (CellLayoutLayoutParams) view.getLayoutParams();
             int seamOffset = lp.getCellX() >= mCellLayout.getCountX() / 2 && lp.canReorder ? 1 : 0;
-            grid.markCells(lp.getCellX() + seamOffset, lp.getCellY(), lp.cellHSpan, lp.cellVSpan,
-                    true);
+            grid.markCells(lp.getCellX() + seamOffset, lp.getCellY(),
+                    lp.cellHSpan + (lp.cellXHalf ? 1 : 0),
+                    lp.cellVSpan + (lp.cellYHalf ? 1 : 0), true);
         }
         Arrays.fill(grid.cells[mCellLayout.getCountX() / 2], true);
         return grid;

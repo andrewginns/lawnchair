@@ -2136,16 +2136,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 return true;
             }
 
-            int[] resultSpan = new int[2];
-            mTargetCell = dropTargetLayout.performReorder((int) mDragViewVisualCenter[0],
-                    (int) mDragViewVisualCenter[1], minSpanX, minSpanY, spanX, spanY,
-                    null, mTargetCell, resultSpan, CellLayout.MODE_ACCEPT_DROP);
-            boolean foundCell = mTargetCell[0] >= 0 && mTargetCell[1] >= 0;
-
-            // Don't accept the drop if there's no room for the item
-            if (!foundCell) {
-                onNoCellFound(dropTargetLayout, d.dragInfo, d.logInstanceId);
-                return false;
+            if (findSubgridDrop(dropTargetLayout, d, null) == null) {
+                int[] resultSpan = new int[2];
+                mTargetCell = dropTargetLayout.performReorder((int) mDragViewVisualCenter[0],
+                        (int) mDragViewVisualCenter[1], minSpanX, minSpanY, spanX, spanY,
+                        null, mTargetCell, resultSpan, CellLayout.MODE_ACCEPT_DROP);
+                if (mTargetCell[0] < 0 || mTargetCell[1] < 0) {
+                    onNoCellFound(dropTargetLayout, d.dragInfo, d.logInstanceId);
+                    return false;
+                }
             }
         }
 
@@ -2248,7 +2247,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             mStatsLogManager.logger().withItemInfo(destInfo).withInstanceId(d.logInstanceId)
                     .log(LauncherEvent.LAUNCHER_ITEM_DROP_FOLDER_CREATED);
             FolderIcon fi = mLauncher.addFolder(target, container, screenId, targetCell[0],
-                    targetCell[1]);
+                    targetCell[1], destInfo.cellXHalf, destInfo.cellYHalf);
             destInfo.cellX = -1;
             destInfo.cellY = -1;
             sourceInfo.cellX = -1;
@@ -2359,6 +2358,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 // Aside from the special case where we're dropping a shortcut onto a shortcut,
                 // we need to find the nearest cell location that is vacant
                 ItemInfo item = d.dragInfo;
+                CellLayout.SubgridPosition subgrid = findSubgridDrop(dropTargetLayout, d, cell);
                 int minSpanX = item.spanX;
                 int minSpanY = item.spanY;
                 if (item.minSpanX > 0 && item.minSpanY > 0) {
@@ -2370,7 +2370,8 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 droppedOnOriginalCell = originalPresenterPos.screenId == screenId
                         && item.container == container
                         && originalPresenterPos.cellX == mTargetCell[0]
-                        && originalPresenterPos.cellY == mTargetCell[1];
+                        && originalPresenterPos.cellY == mTargetCell[1]
+                        && !item.cellXHalf && !item.cellYHalf && subgrid == null;
                 droppedOnOriginalCellDuringTransition = droppedOnOriginalCell && mIsSwitchingState;
 
                 // When quickly moving an item, a user may accidentally rearrange their
@@ -2379,7 +2380,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                         && !droppedOnOriginalCellDuringTransition && !dropTargetLayout
                         .isRegionVacant(mTargetCell[0], mTargetCell[1], spanX, spanY);
                 int[] resultSpan = new int[2];
-                if (returnToOriginalCellToPreventShuffling) {
+                if (subgrid != null) {
+                    dropTargetLayout.revertTempState();
+                    mTargetCell[0] = subgrid.x();
+                    mTargetCell[1] = subgrid.y();
+                    resultSpan[0] = spanX;
+                    resultSpan[1] = spanY;
+                } else if (returnToOriginalCellToPreventShuffling) {
                     mTargetCell[0] = mTargetCell[1] = -1;
                 } else {
                     mTargetCell = dropTargetLayout.performReorder((int) mDragViewVisualCenter[0],
@@ -2410,6 +2417,8 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                         snappedToNewPage = true;
                     }
                     final ItemInfo info = (ItemInfo) cell.getTag();
+                    boolean halfX = subgrid != null && subgrid.halfX();
+                    boolean halfY = subgrid != null && subgrid.halfY();
                     if (hasMovedLayouts) {
                         // Reparent the view
                         CellLayout parentCell = getParentCellLayoutForView(cell);
@@ -2420,6 +2429,8 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                         } else if (FeatureFlags.IS_STUDIO_BUILD) {
                             throw new NullPointerException("mDragInfo.cell has null parent");
                         }
+                        info.cellXHalf = halfX;
+                        info.cellYHalf = halfY;
                         addInScreen(cell, container, screenId, mTargetCell[0], mTargetCell[1],
                                 info.spanX, info.spanY);
                     }
@@ -2430,6 +2441,8 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                     lp.setCellX(mTargetCell[0]);
                     lp.setTmpCellY(mTargetCell[1]);
                     lp.setCellY(mTargetCell[1]);
+                    lp.cellXHalf = halfX;
+                    lp.cellYHalf = halfY;
                     lp.cellHSpan = item.spanX;
                     lp.cellVSpan = item.spanY;
                     lp.isLockedToGrid = true;
@@ -2443,7 +2456,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                                 (LauncherAppWidgetHostView) cell, dropTargetLayout, forceWidgetResize);
                     }
                     mLauncher.getModelWriter().modifyItemInDatabase(info, container, screenId,
-                            lp.getCellX(), lp.getCellY(), item.spanX, item.spanY);
+                            lp.getCellX(), lp.getCellY(), item.spanX, item.spanY, halfX, halfY);
                 } else {
                     if (!returnToOriginalCellToPreventShuffling) {
                         onNoCellFound(dropTargetLayout, d.dragInfo, d.logInstanceId);
@@ -2804,6 +2817,19 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (mDragTargetLayout != null) {
             // We want the point to be mapped to the dragTarget.
             mapPointFromDropLayout(mDragTargetLayout, mDragViewVisualCenter);
+
+            CellLayout.SubgridPosition subgrid = findSubgridDrop(mDragTargetLayout, d, child);
+            if (subgrid != null) {
+                mTargetCell[0] = subgrid.x();
+                mTargetCell[1] = subgrid.y();
+                setCurrentDropOverCell(-1, -1);
+                cleanupReorder(true);
+                mDragTargetLayout.mPreviousSolution = null;
+                mDragTargetLayout.revertTempState();
+                mDragTargetLayout.visualizeDropLocation(subgrid.x(), subgrid.y(), 1, 1,
+                        subgrid.halfX(), subgrid.halfY(), d);
+                return;
+            }
 
             int minSpanX = item.spanX;
             int minSpanY = item.spanY;
@@ -3257,7 +3283,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 }
             }
 
-            if (touchXY != null) {
+            CellLayout.SubgridPosition subgrid = touchXY == null
+                    ? null : findSubgridDrop(cellLayout, d, null);
+            if (subgrid != null) {
+                cellLayout.revertTempState();
+                mTargetCell[0] = subgrid.x();
+                mTargetCell[1] = subgrid.y();
+            } else if (touchXY != null) {
                 // when dragging and dropping, just find the closest free spot
                 mTargetCell = cellLayout.performReorder((int) mDragViewVisualCenter[0],
                         (int) mDragViewVisualCenter[1], 1, 1, 1, 1,
@@ -3268,7 +3300,8 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             // Add the item to DB before adding to screen ensures that the container and other
             // values of the info is properly updated.
             mLauncher.getModelWriter().addOrMoveItemInDatabase(info, container, screenId,
-                    mTargetCell[0], mTargetCell[1]);
+                    mTargetCell[0], mTargetCell[1], subgrid != null && subgrid.halfX(),
+                    subgrid != null && subgrid.halfY());
 
             addInScreen(view, container, screenId, mTargetCell[0], mTargetCell[1],
                     info.spanX, info.spanY);
@@ -3446,8 +3479,24 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     @Thunk
     int[] findNearestArea(int pixelX, int pixelY,
                           int spanX, int spanY, CellLayout layout, int[] recycle) {
+        if (spanX == 1 && spanY == 1 && !mLauncher.isHotseatLayout(layout)) {
+            int[] target = layout.findSubgridFolderTarget(pixelX, pixelY, recycle);
+            if (target != null) return target;
+        }
         return layout.findNearestAreaIgnoreOccupied(
                 pixelX, pixelY, spanX, spanY, recycle);
+    }
+
+    @Nullable
+    private CellLayout.SubgridPosition findSubgridDrop(CellLayout layout, DragObject drag,
+            @Nullable View ignore) {
+        if (drag.dragInfo instanceof PendingAddItemInfo
+                || drag.originalDragInfo instanceof PendingAddItemInfo
+                || mLauncher.getAccessibilityDelegate().isInAccessibleDrag()) {
+            return null;
+        }
+        return layout.findSubgridDrop(mDragViewVisualCenter[0], mDragViewVisualCenter[1],
+                drag, ignore);
     }
 
     void setup(DragController dragController) {

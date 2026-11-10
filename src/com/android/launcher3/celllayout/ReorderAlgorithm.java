@@ -26,7 +26,6 @@ import com.android.launcher3.util.GridOccupancy;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
 import app.lawnchair.preferences2.PreferenceCacheExtensionsKt;
@@ -134,10 +133,8 @@ public class ReorderAlgorithm {
         Rect occupiedRect = new Rect(cellX, cellY, cellX + spanX, cellY + spanY);
 
         // Lawnchair: Widget overlap
-        if (PreferenceCacheExtensionsKt.firstCached(mCellLayout.pref.getAllowWidgetOverlap(), mCellLayout.pref)) {
-            solution.intersectingViews = new ArrayList<>(intersectingViews);
-            return true;
-        }
+        boolean allowOverlap = PreferenceCacheExtensionsKt.firstCached(
+                mCellLayout.pref.getAllowWidgetOverlap(), mCellLayout.pref);
 
         // Mark the desired location of the view currently being dragged.
         if (ignoreView != null) {
@@ -165,9 +162,11 @@ public class ReorderAlgorithm {
             if (child == ignoreView) continue;
             CellAndSpan c = solution.map.get(child);
             CellLayoutLayoutParams lp = (CellLayoutLayoutParams) child.getLayoutParams();
-            r1.set(c.cellX, c.cellY, c.cellX + c.spanX, c.cellY + c.spanY);
+            if (allowOverlap && !lp.isOnSubgrid()) continue;
+            r1.set(c.cellX, c.cellY, c.cellX + c.spanX + (lp.cellXHalf ? 1 : 0),
+                    c.cellY + c.spanY + (lp.cellYHalf ? 1 : 0));
             if (Rect.intersects(r0, r1)) {
-                if (!lp.canReorder) {
+                if (!lp.canReorder || lp.isOnSubgrid()) {
                     return false;
                 }
                 intersectingViews.add(child);
@@ -175,6 +174,7 @@ public class ReorderAlgorithm {
         }
 
         solution.intersectingViews = intersectingViews;
+        if (allowOverlap) return true;
 
         // First we try to find a solution which respects the push mechanic. That is,
         // we try to find a solution such that no displaced item travels through another item
@@ -272,7 +272,7 @@ public class ReorderAlgorithm {
                 if (!cluster.views.contains(v) && v != dragView) {
                     if (cluster.isViewTouchingEdge(v, whichEdge)) {
                         CellLayoutLayoutParams lp = (CellLayoutLayoutParams) v.getLayoutParams();
-                        if (!lp.canReorder) {
+                        if (!lp.canReorder || lp.isOnSubgrid()) {
                             // The push solution includes the all apps button, this is not viable.
                             fail = true;
                             break;
@@ -444,14 +444,14 @@ public class ReorderAlgorithm {
                 .entrySet()
                 .stream()
                 .filter(entry -> entry.getKey() != ignoreView)
-                .map(Entry::getValue)
-                .anyMatch(cellAndSpan -> region.intersect(
-                        cellAndSpan.cellX,
-                        cellAndSpan.cellY,
-                        cellAndSpan.cellX + cellAndSpan.spanX,
-                        cellAndSpan.cellY + cellAndSpan.spanY
-                        )
-                );
+                .anyMatch(entry -> {
+                    CellAndSpan pos = entry.getValue();
+                    CellLayoutLayoutParams lp =
+                            (CellLayoutLayoutParams) entry.getKey().getLayoutParams();
+                    return region.intersects(pos.cellX, pos.cellY,
+                            pos.cellX + pos.spanX + (lp.cellXHalf ? 1 : 0),
+                            pos.cellY + pos.spanY + (lp.cellYHalf ? 1 : 0));
+                });
     }
 
     /**

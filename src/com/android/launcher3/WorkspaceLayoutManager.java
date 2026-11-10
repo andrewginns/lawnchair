@@ -155,6 +155,8 @@ public interface WorkspaceLayoutManager {
             Log.e(TAG, "Attempted to add null item to workspace");
             return;
         }
+        lp.cellXHalf = container == LauncherSettings.Favorites.CONTAINER_DESKTOP && info.cellXHalf;
+        lp.cellYHalf = container == LauncherSettings.Favorites.CONTAINER_DESKTOP && info.cellYHalf;
         int childId = info.getViewId();
 
         boolean markCellsAsOccupied = !(child instanceof Folder);

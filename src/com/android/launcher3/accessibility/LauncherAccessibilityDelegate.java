@@ -249,7 +249,7 @@ public class LauncherAccessibilityDelegate extends BaseAccessibilityDelegate<Lau
                     ((AppWidgetResizeFrame) host).getViewForAccessibility(), info);
         }
         AppWidgetProviderInfo providerInfo = ((LauncherAppWidgetHostView) host).getAppWidgetInfo();
-        if (providerInfo == null) {
+        if (providerInfo == null || info.cellXHalf || info.cellYHalf) {
             return actions;
         }
 

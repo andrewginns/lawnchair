@@ -136,7 +136,8 @@ public class WorkspaceItemSpaceFinder {
         GridOccupancy occupied = new GridOccupancy(mIDP.numColumns, mIDP.numRows);
         if (occupiedPos != null) {
             for (ItemInfo r : occupiedPos) {
-                occupied.markCells(r, true);
+                occupied.markCells(r.cellX, r.cellY, r.spanX + (r.cellXHalf ? 1 : 0),
+                        r.spanY + (r.cellYHalf ? 1 : 0), true);
             }
         }
         return occupied.findVacantCell(xy, spanX, spanY);

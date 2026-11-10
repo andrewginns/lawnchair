@@ -225,6 +225,9 @@ public class AppWidgetResizeFrame extends AbstractFloatingView implements View.O
     }
 
     public static void showForWidget(LauncherAppWidgetHostView widget, CellLayout cellLayout) {
+        if (widget.getLayoutParams() instanceof CellLayoutLayoutParams lp && lp.isOnSubgrid()) {
+            return;
+        }
         PreferenceManager2 pref2 = PreferenceManager2.getInstance(widget.getContext());
         boolean force = PreferenceCacheExtensionsKt.firstCached(pref2.getForceWidgetResize());
         boolean unlimited = PreferenceCacheExtensionsKt.firstCached(pref2.getWidgetUnlimitedSize());

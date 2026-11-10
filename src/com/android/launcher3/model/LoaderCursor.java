@@ -537,6 +537,10 @@ public class LoaderCursor extends CursorWrapper {
         info.screenId = getInt(mScreenIndex);
         info.cellX = getInt(mCellXIndex);
         info.cellY = getInt(mCellYIndex);
+        info.cellXHalf = container == Favorites.CONTAINER_DESKTOP
+                && getFloat(mCellXIndex) == info.cellX + 0.5f;
+        info.cellYHalf = container == Favorites.CONTAINER_DESKTOP
+                && getFloat(mCellYIndex) == info.cellY + 0.5f;
     }
 
     /**
@@ -653,8 +657,12 @@ public class LoaderCursor extends CursorWrapper {
 
         final int countX = mIDP.numColumns;
         final int countY = mIDP.numRows;
-        if (item.container == Favorites.CONTAINER_DESKTOP && item.cellX < 0 || item.cellY < 0
-                || item.cellX + item.spanX > countX || item.cellY + item.spanY > countY) {
+        final int halfX = Math.round(item.databaseCellX() * 2);
+        final int halfY = Math.round(item.databaseCellY() * 2);
+        final int spanX = item.spanX * 2;
+        final int spanY = item.spanY * 2;
+        if (halfX < 0 || halfY < 0 || halfX + spanX > countX * 2
+                || halfY + spanY > countY * 2) {
             Log.e(TAG, "Error loading shortcut " + item
                     + " into cell (" + containerIndex + "-" + item.screenId + ":"
                     + item.cellX + "," + item.cellY
@@ -663,22 +671,20 @@ public class LoaderCursor extends CursorWrapper {
         }
 
         if (!mOccupied.containsKey(item.screenId)) {
-            GridOccupancy screen = new GridOccupancy(countX + 1, countY + 1);
+            GridOccupancy screen = new GridOccupancy(countX * 2, countY * 2);
             if (item.screenId == Workspace.FIRST_SCREEN_ID && PreferenceCacheExtensionsKt.firstCached(preferenceManager2.getEnableSmartspace())) {
                 // Mark the first X columns (X is width of the search container) in the first row as
                 // occupied (if the feature is enabled) in order to account for the search
                 // container.
-                int spanX = mIDP.numSearchContainerColumns;
-                int spanY = 1;
-                screen.markCells(0, 0, spanX, spanY, true);
+                screen.markCells(0, 0, mIDP.numSearchContainerColumns * 2, 2, true);
             }
             mOccupied.put(item.screenId, screen);
         }
         final GridOccupancy occupancy = mOccupied.get(item.screenId);
 
         // Check if any workspace icons overlap with each other
-        if (occupancy.isRegionVacant(item.cellX, item.cellY, item.spanX, item.spanY)) {
-            occupancy.markCells(item, true);
+        if (occupancy.isRegionVacant(halfX, halfY, spanX, spanY)) {
+            occupancy.markCells(halfX, halfY, spanX, spanY, true);
             return true;
         } else {
             Log.e(TAG, "Error loading shortcut " + item

@@ -81,7 +81,8 @@ public class LauncherDelegate {
                         finalItem =  info.getContents().remove(0);
                         newIcon = mLauncher.getItemInflater().inflateItem(finalItem, cellLayout);
                         mLauncher.getModelWriter().addOrMoveItemInDatabase(finalItem,
-                                info.container, info.screenId, info.cellX, info.cellY);
+                                info.container, info.screenId, info.cellX, info.cellY,
+                                info.cellXHalf, info.cellYHalf);
                     }
 
                     // Remove the folder

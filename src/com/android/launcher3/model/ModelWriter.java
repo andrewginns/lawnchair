@@ -112,12 +112,19 @@ public class ModelWriter {
      */
     public void addOrMoveItemInDatabase(ItemInfo item,
             int container, int screenId, int cellX, int cellY) {
+        addOrMoveItemInDatabase(item, container, screenId, cellX, cellY, false, false);
+    }
+
+    public void addOrMoveItemInDatabase(ItemInfo item, int container, int screenId,
+            int cellX, int cellY, boolean halfX, boolean halfY) {
         if (item.id == ItemInfo.NO_ID) {
             // From all apps
+            item.cellXHalf = halfX;
+            item.cellYHalf = halfY;
             addItemToDatabase(item, container, screenId, cellX, cellY);
         } else {
             // From somewhere else
-            moveItemInDatabase(item, container, screenId, cellX, cellY);
+            moveItemInDatabase(item, container, screenId, cellX, cellY, halfX, halfY);
         }
     }
 
@@ -184,13 +191,20 @@ public class ModelWriter {
      */
     public void moveItemInDatabase(final ItemInfo item,
             int container, int screenId, int cellX, int cellY) {
+        moveItemInDatabase(item, container, screenId, cellX, cellY, false, false);
+    }
+
+    private void moveItemInDatabase(ItemInfo item, int container, int screenId,
+            int cellX, int cellY, boolean halfX, boolean halfY) {
         updateItemInfoProps(item, container, screenId, cellX, cellY);
+        item.cellXHalf = halfX;
+        item.cellYHalf = halfY;
         notifyItemModified(item);
 
         enqueueDeleteRunnable(new UpdateItemRunnable(item, () -> new ContentWriter(mContext)
                 .put(Favorites.CONTAINER, item.container)
-                .put(Favorites.CELLX, item.cellX)
-                .put(Favorites.CELLY, item.cellY)
+                .putFloat(Favorites.CELLX, item.databaseCellX())
+                .putFloat(Favorites.CELLY, item.databaseCellY())
                 .put(Favorites.RANK, item.rank)
                 .put(Favorites.SCREEN, item.screenId)));
     }
@@ -208,6 +222,8 @@ public class ModelWriter {
         for (int i = 0; i < count; i++) {
             ItemInfo item = items.get(i);
             updateItemInfoProps(item, container, screen, item.cellX, item.cellY);
+            item.cellXHalf = false;
+            item.cellYHalf = false;
 
             final ContentValues values = new ContentValues();
             values.put(Favorites.CONTAINER, item.container);
@@ -326,14 +342,21 @@ public class ModelWriter {
      */
     public void modifyItemInDatabase(final ItemInfo item,
             int container, int screenId, int cellX, int cellY, int spanX, int spanY) {
+        modifyItemInDatabase(item, container, screenId, cellX, cellY, spanX, spanY, false, false);
+    }
+
+    public void modifyItemInDatabase(ItemInfo item, int container, int screenId, int cellX,
+            int cellY, int spanX, int spanY, boolean halfX, boolean halfY) {
         updateItemInfoProps(item, container, screenId, cellX, cellY);
+        item.cellXHalf = halfX;
+        item.cellYHalf = halfY;
         item.spanX = spanX;
         item.spanY = spanY;
         notifyItemModified(item);
         new UpdateItemRunnable(item, () -> new ContentWriter(mContext)
                 .put(Favorites.CONTAINER, item.container)
-                .put(Favorites.CELLX, item.cellX)
-                .put(Favorites.CELLY, item.cellY)
+                .putFloat(Favorites.CELLX, item.databaseCellX())
+                .putFloat(Favorites.CELLY, item.databaseCellY())
                 .put(Favorites.RANK, item.rank)
                 .put(Favorites.SPANX, item.spanX)
                 .put(Favorites.SPANY, item.spanY)

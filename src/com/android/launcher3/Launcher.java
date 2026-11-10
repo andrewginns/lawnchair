@@ -1976,7 +1976,14 @@ public class Launcher extends StatefulActivity<LauncherState>
      */
     public FolderIcon addFolder(CellLayout layout, int container, final int screenId, int cellX,
             int cellY) {
+        return addFolder(layout, container, screenId, cellX, cellY, false, false);
+    }
+
+    FolderIcon addFolder(CellLayout layout, int container, int screenId, int cellX,
+            int cellY, boolean halfX, boolean halfY) {
         final FolderInfo folderInfo = new FolderInfo();
+        folderInfo.cellXHalf = halfX;
+        folderInfo.cellYHalf = halfY;
 
         // Update the model
         getModelWriter().addItemToDatabase(folderInfo, container, screenId, cellX, cellY);

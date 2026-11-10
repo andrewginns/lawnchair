@@ -137,6 +137,10 @@ public class ItemInfo {
      */
     public int cellY = -1;
 
+    // Desktop positions may start halfway into their anchor cell.
+    public boolean cellXHalf;
+    public boolean cellYHalf;
+
     /**
      * Indicates the X cell span.
      */
@@ -210,6 +214,8 @@ public class ItemInfo {
         title = info.title;
         cellX = info.cellX;
         cellY = info.cellY;
+        cellXHalf = info.cellXHalf;
+        cellYHalf = info.cellYHalf;
         spanX = info.spanX;
         spanY = info.spanY;
         minSpanX = info.minSpanX;
@@ -262,8 +268,8 @@ public class ItemInfo {
         writer.put(LauncherSettings.Favorites.ITEM_TYPE, itemType)
                 .put(LauncherSettings.Favorites.CONTAINER, container)
                 .put(LauncherSettings.Favorites.SCREEN, screenId)
-                .put(LauncherSettings.Favorites.CELLX, cellX)
-                .put(LauncherSettings.Favorites.CELLY, cellY)
+                .putFloat(LauncherSettings.Favorites.CELLX, databaseCellX())
+                .putFloat(LauncherSettings.Favorites.CELLY, databaseCellY())
                 .put(LauncherSettings.Favorites.SPANX, spanX)
                 .put(LauncherSettings.Favorites.SPANY, spanY)
                 .put(LauncherSettings.Favorites.RANK, rank);
@@ -275,9 +281,19 @@ public class ItemInfo {
         screenId = values.getAsInteger(LauncherSettings.Favorites.SCREEN);
         cellX = values.getAsInteger(LauncherSettings.Favorites.CELLX);
         cellY = values.getAsInteger(LauncherSettings.Favorites.CELLY);
+        cellXHalf = values.getAsFloat(LauncherSettings.Favorites.CELLX) == cellX + 0.5f;
+        cellYHalf = values.getAsFloat(LauncherSettings.Favorites.CELLY) == cellY + 0.5f;
         spanX = values.getAsInteger(LauncherSettings.Favorites.SPANX);
         spanY = values.getAsInteger(LauncherSettings.Favorites.SPANY);
         rank = values.getAsInteger(LauncherSettings.Favorites.RANK);
+    }
+
+    public float databaseCellX() {
+        return cellX + (container == Favorites.CONTAINER_DESKTOP && cellXHalf ? 0.5f : 0f);
+    }
+
+    public float databaseCellY() {
+        return cellY + (container == Favorites.CONTAINER_DESKTOP && cellYHalf ? 0.5f : 0f);
     }
 
     /**

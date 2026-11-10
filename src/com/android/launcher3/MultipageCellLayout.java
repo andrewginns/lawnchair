@@ -34,6 +34,11 @@ import com.android.launcher3.util.MultiTranslateDelegate;
  */
 public class MultipageCellLayout extends CellLayout {
 
+    /** The stored occupancy, before the reorder algorithm adds a temporary seam. */
+    public GridOccupancy getBaseOccupied() {
+        return mOccupied;
+    }
+
     private final Drawable mLeftBackground;
     private final Drawable mRightBackground;
 
