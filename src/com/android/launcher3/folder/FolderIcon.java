@@ -719,6 +719,8 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
 
         if (!mBackgroundIsVisible) return;
 
+        // The open/close animation still needs the ordinary preview geometry for a covered folder.
+        mPreviewItemManager.recomputePreviewDrawingParams();
         if (mCoverIcon != null && !mAnimating && !mBackground.drawingDelegated()) {
             int size = mActivity.getDeviceProfile().iconSizePx;
             int left = (getWidth() - size) / 2;
@@ -727,8 +729,6 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
             mCoverIcon.draw(canvas);
             return;
         }
-
-        mPreviewItemManager.recomputePreviewDrawingParams();
 
         if (!mBackground.drawingDelegated()) {
             mBackground.drawBackground(canvas);
