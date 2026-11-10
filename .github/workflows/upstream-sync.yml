@@ -68,8 +68,8 @@ jobs:
           if [[ -n "$RELEASE_PR" ]]; then
             [[ "$RELEASE_PR" =~ ^[1-9][0-9]*$ ]]
             candidate=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$RELEASE_PR" | jq -er \
-              --arg branch "$BASE_BRANCH" --arg head "$SYNC_BRANCH" --arg tip "$base" \
-              'select(.merged and .merged_by.login == "github-actions[bot]" and .base.ref == $branch and .head.ref == $head and .merge_commit_sha == $tip) | .head.sha')
+              --arg repo "$GITHUB_REPOSITORY" --arg branch "$BASE_BRANCH" --arg head "$SYNC_BRANCH" --arg tip "$base" \
+              'select(.merged and .merged_by.login == "github-actions[bot]" and .base.ref == $branch and .head.ref == $head and .head.repo.full_name == $repo and .merge_commit_sha == $tip) | .head.sha')
             echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
             echo "release_pr=$RELEASE_PR" >> "$GITHUB_OUTPUT"
             exit 0
@@ -298,8 +298,8 @@ jobs:
           CANDIDATE: ${{ needs.sync.outputs.candidate }}
         run: |
           pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")
-          merge_sha=$(jq -er --arg base "$BASE_BRANCH" --arg head "$SYNC_BRANCH" --arg sha "$CANDIDATE" \
-            'select(.merged and .merged_by.login == "github-actions[bot]" and .base.ref == $base and .head.ref == $head and .head.sha == $sha) | .merge_commit_sha' <<< "$pr")
+          merge_sha=$(jq -er --arg repo "$GITHUB_REPOSITORY" --arg base "$BASE_BRANCH" --arg head "$SYNC_BRANCH" --arg sha "$CANDIDATE" \
+            'select(.merged and .merged_by.login == "github-actions[bot]" and .base.ref == $base and .head.ref == $head and .head.repo.full_name == $repo and .head.sha == $sha) | .merge_commit_sha' <<< "$pr")
           [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]]
           tested_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$CANDIDATE" --jq '.tree.sha')
           merged_tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$merge_sha" --jq '.tree.sha')
@@ -352,7 +352,7 @@ jobs:
           release=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" | jq -sc --arg tag "$tag" 'flatten | map(select(.tag_name == $tag)) | first // empty')
           if [[ -z "$release" ]]; then
             release=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
-              -f tag_name="$tag" -f target_commitish="$MERGE_SHA" -F draft=true -F prerelease=false \
+              -f tag_name="$tag" -F draft=true -F prerelease=false \
               -f name="Lawnchair 16 Nova-style — upstream sync #$PR_NUMBER" -f "body=$(cat "$notes")")
           fi
           asset_digest=$(jq -r --arg name "${apk##*/}" '.assets[] | select(.name == $name) | .digest // ""' <<< "$release")
