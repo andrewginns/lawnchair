@@ -111,6 +111,7 @@ import android.animation.ValueAnimator;
 import android.annotation.TargetApi;
 import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
+import android.appwidget.AppWidgetProviderInfo;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentCallbacks2;
 import android.content.Context;
@@ -388,6 +389,7 @@ public class Launcher extends StatefulActivity<LauncherState>
 
     // Activity result which needs to be processed after workspace has loaded.
     private ActivityResultInfo mPendingActivityResult;
+    private Runnable mPendingRestoredWidgetConfig;
     /**
      * Holds extra information required to handle a result from an external call, like
      * {@link #startActivityForResult(Intent, int)} or {@link #requestPermissions(String[], int)}
@@ -786,17 +788,14 @@ public class Launcher extends StatefulActivity<LauncherState>
                 completeRestoreAppWidget(appWidgetId, LauncherAppWidgetInfo.RESTORE_COMPLETED);
                 break;
             case REQUEST_BIND_PENDING_APPWIDGET: {
-                int widgetId = appWidgetId;
-                LauncherAppWidgetInfo widgetInfo =
-                        completeRestoreAppWidget(widgetId, LauncherAppWidgetInfo.FLAG_UI_NOT_READY);
-                if (widgetInfo != null) {
-                    // Since the view was just bound, also launch the configure activity if needed
-                    LauncherAppWidgetProviderInfo provider = mAppWidgetManager
-                            .getLauncherAppWidgetInfo(widgetId, info.getTargetComponent());
-                    if (provider != null) {
-                        new WidgetAddFlowHandler(provider)
-                                .startConfigActivity(this, widgetInfo,
-                                        REQUEST_RECONFIGURE_APPWIDGET);
+                WidgetAddFlowHandler flow = info.getWidgetHandler();
+                if (flow != null) {
+                    LauncherAppWidgetProviderInfo expected = flow.getProviderInfo(this);
+                    AppWidgetProviderInfo bound = AppWidgetManager.getInstance(this)
+                            .getAppWidgetInfo(appWidgetId);
+                    if (bound != null && expected.provider.equals(bound.provider)
+                            && info.user.equals(bound.getProfile())) {
+                        finishPendingWidgetBind(appWidgetId, flow);
                     }
                 }
                 break;
@@ -1040,6 +1039,12 @@ public class Launcher extends StatefulActivity<LauncherState>
     @CallSuper
     protected void onDeferredResumed() {
         logStopAndResume(true /* isResume */);
+
+        if (mPendingRestoredWidgetConfig != null) {
+            // Let Quickstep finish cleaning up the bind activity before opening configuration.
+            mHandler.post(mPendingRestoredWidgetConfig);
+            mPendingRestoredWidgetConfig = null;
+        }
 
         // Process any items that were added while Launcher was away.
         ItemInstallQueue.INSTANCE.get(this)
@@ -2303,6 +2308,66 @@ public class Launcher extends StatefulActivity<LauncherState>
         if (view != null) {
             mWorkspace.addInScreen(view, item);
             mWorkspace.requestLayout();
+        }
+    }
+
+    /** Continues setup for a widget restored to the workspace. */
+    public void startPendingWidgetSetup(LauncherAppWidgetInfo info) {
+        LauncherAppWidgetProviderInfo provider = mAppWidgetManager.findProvider(
+                info.providerName, info.user);
+        if (provider == null) {
+            return;
+        }
+        WidgetAddFlowHandler flow = new WidgetAddFlowHandler(provider);
+        int widgetId = info.appWidgetId;
+        if (!info.hasRestoreFlag(LauncherAppWidgetInfo.FLAG_ID_NOT_VALID)) {
+            if (!flow.startConfigActivity(this, info, REQUEST_RECONFIGURE_APPWIDGET)) {
+                completeRestoreAppWidget(widgetId, LauncherAppWidgetInfo.RESTORE_COMPLETED);
+            }
+            return;
+        }
+        if (!info.hasRestoreFlag(LauncherAppWidgetInfo.FLAG_ID_ALLOCATED)) {
+            Log.e(TAG, "No ID allocated for pending widget " + info.providerName);
+            return;
+        }
+
+        // The system may already have bound this ID, or the user may have granted Lawnchair
+        // permission to bind widgets since this placeholder was created.
+        AppWidgetProviderInfo bound = AppWidgetManager.getInstance(this).getAppWidgetInfo(widgetId);
+        if (bound != null) {
+            if (info.providerName.equals(bound.provider) && info.user.equals(bound.getProfile())) {
+                finishPendingWidgetBind(widgetId, flow);
+            } else {
+                Log.w(TAG, "Wrong provider for pending widget " + info.providerName);
+            }
+        } else if (mAppWidgetManager.bindAppWidgetIdIfAllowed(widgetId, provider,
+                WidgetSizes.getWidgetSizeOptions(this, info.providerName, info.spanX, info.spanY))) {
+            finishPendingWidgetBind(widgetId, flow);
+        } else {
+            flow.startBindFlow(this, widgetId, info, REQUEST_BIND_PENDING_APPWIDGET);
+        }
+    }
+
+    private void finishPendingWidgetBind(int widgetId, WidgetAddFlowHandler flow) {
+        boolean needsConfigure = flow.needsConfigure();
+        LauncherAppWidgetInfo info = completeRestoreAppWidget(widgetId, needsConfigure
+                ? LauncherAppWidgetInfo.FLAG_UI_NOT_READY : LauncherAppWidgetInfo.RESTORE_COMPLETED);
+        if (info == null || !needsConfigure) {
+            return;
+        }
+        if ((getActivityFlags() & ACTIVITY_STATE_DEFERRED_RESUMED) != 0) {
+            flow.startConfigActivity(this, info, REQUEST_RECONFIGURE_APPWIDGET);
+        } else {
+            mPendingRestoredWidgetConfig = () -> {
+                if (isDestroyed() || !hasBeenResumed() || mPendingRequestArgs != null) {
+                    return;
+                }
+                View view = mWorkspace.getWidgetForAppWidgetId(widgetId);
+                if (view instanceof PendingAppWidgetHostView
+                        && view.getTag() instanceof LauncherAppWidgetInfo pendingInfo) {
+                    flow.startConfigActivity(this, pendingInfo, REQUEST_RECONFIGURE_APPWIDGET);
+                }
+            };
         }
     }
 
