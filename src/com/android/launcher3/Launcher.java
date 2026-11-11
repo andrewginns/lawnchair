@@ -233,6 +233,7 @@ import com.android.launcher3.util.BackPressHandler;
 import com.android.launcher3.util.CannedAnimationCoordinator;
 import com.android.launcher3.util.ComponentKey;
 import com.android.launcher3.util.ContextTracker;
+import com.android.launcher3.util.IntArray;
 import com.android.launcher3.util.IntSet;
 import com.android.launcher3.util.ItemInflater;
 import com.android.launcher3.util.KeyboardShortcutsDelegate;
@@ -2326,11 +2327,6 @@ public class Launcher extends StatefulActivity<LauncherState>
             }
             return;
         }
-        if (!info.hasRestoreFlag(LauncherAppWidgetInfo.FLAG_ID_ALLOCATED)) {
-            Log.e(TAG, "No ID allocated for pending widget " + info.providerName);
-            return;
-        }
-
         // The system may already have bound this ID, or the user may have granted Lawnchair
         // permission to bind widgets since this placeholder was created.
         AppWidgetProviderInfo bound = AppWidgetManager.getInstance(this).getAppWidgetInfo(widgetId);
@@ -2340,7 +2336,23 @@ public class Launcher extends StatefulActivity<LauncherState>
             } else {
                 Log.w(TAG, "Wrong provider for pending widget " + info.providerName);
             }
-        } else if (mAppWidgetManager.bindAppWidgetIdIfAllowed(widgetId, provider,
+            return;
+        }
+
+        // An ID can still be marked allocated in the workspace after Android loses its record.
+        // Keep IDs that belong to this host, including widgets still waiting for bind approval.
+        if (!IntArray.wrap(mAppWidgetHolder.getAppWidgetIds()).contains(widgetId)) {
+            widgetId = mAppWidgetHolder.allocateAppWidgetId();
+            if (widgetId <= 0) {
+                Log.w(TAG, "Could not allocate an ID for pending widget " + info.providerName);
+                return;
+            }
+            info.appWidgetId = widgetId;
+            info.restoreStatus |= LauncherAppWidgetInfo.FLAG_ID_ALLOCATED;
+            getModelWriter().updateItemInDatabase(info);
+        }
+
+        if (mAppWidgetManager.bindAppWidgetIdIfAllowed(widgetId, provider,
                 WidgetSizes.getWidgetSizeOptions(this, info.providerName, info.spanX, info.spanY))) {
             finishPendingWidgetBind(widgetId, flow);
         } else {
