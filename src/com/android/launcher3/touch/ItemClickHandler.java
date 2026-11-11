@@ -17,8 +17,6 @@ package com.android.launcher3.touch;
 
 import static android.multiuser.Flags.enableMovingContentIntoPrivateSpace;
 
-import static com.android.launcher3.LauncherConstants.ActivityCodes.REQUEST_BIND_PENDING_APPWIDGET;
-import static com.android.launcher3.LauncherConstants.ActivityCodes.REQUEST_RECONFIGURE_APPWIDGET;
 import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT;
 import static com.android.launcher3.Utilities.ATLEAST_BAKLAVA;
 import static com.android.launcher3.allapps.AlphabeticalAppsList.PRIVATE_SPACE_PACKAGE;
@@ -69,10 +67,7 @@ import com.android.launcher3.testing.shared.TestProtocol;
 import com.android.launcher3.util.ApiWrapper;
 import com.android.launcher3.util.ItemInfoMatcher;
 import com.android.launcher3.views.FloatingIconView;
-import com.android.launcher3.widget.LauncherAppWidgetProviderInfo;
 import com.android.launcher3.widget.PendingAppWidgetHostView;
-import com.android.launcher3.widget.WidgetAddFlowHandler;
-import com.android.launcher3.widget.WidgetManagerHelper;
 
 import java.util.Collections;
 import java.util.Objects;
@@ -185,30 +180,7 @@ public class ItemClickHandler {
 
         final LauncherAppWidgetInfo info = (LauncherAppWidgetInfo) v.getTag();
         if (v.isReadyForClickSetup()) {
-            LauncherAppWidgetProviderInfo appWidgetInfo = new WidgetManagerHelper(launcher)
-                    .findProvider(info.providerName, info.user);
-            if (appWidgetInfo == null) {
-                Log.e(TAG, "onClickPendingWidget: Pending widget ready for click setup,"
-                        + " but LauncherAppWidgetProviderInfo was null. Returning."
-                        + " component=" + info.getTargetComponent());
-                return;
-            }
-            WidgetAddFlowHandler addFlowHandler = new WidgetAddFlowHandler(appWidgetInfo);
-
-            if (info.hasRestoreFlag(LauncherAppWidgetInfo.FLAG_ID_NOT_VALID)) {
-                if (!info.hasRestoreFlag(LauncherAppWidgetInfo.FLAG_ID_ALLOCATED)) {
-                    // This should not happen, as we make sure that an Id is allocated during bind.
-                    Log.e(TAG, "onClickPendingWidget: Pending widget ready for click setup,"
-                            + " and LauncherAppWidgetProviderInfo was found. However,"
-                            + " no appWidgetId was allocated. Returning."
-                            + " component=" + info.getTargetComponent());
-                    return;
-                }
-                addFlowHandler.startBindFlow(launcher, info.appWidgetId, info,
-                        REQUEST_BIND_PENDING_APPWIDGET);
-            } else {
-                addFlowHandler.startConfigActivity(launcher, info, REQUEST_RECONFIGURE_APPWIDGET);
-            }
+            launcher.startPendingWidgetSetup(info);
         } else {
             final String packageName = info.providerName.getPackageName();
             onClickPendingAppItem(v, launcher, packageName, info.installProgress >= 0);

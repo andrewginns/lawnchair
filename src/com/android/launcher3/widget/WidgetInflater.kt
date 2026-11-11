@@ -158,28 +158,19 @@ constructor(
                         // If the widget has a configure activity, it is still needs to set it
                         // up, otherwise the widget is ready to go.
                         item.restoreStatus =
-                            if ((appWidgetInfo.configure == null) || isDirectConfig)
+                            if (isDirectConfig || !WidgetAddFlowHandler(appWidgetInfo).needsConfigure())
                                 LauncherAppWidgetInfo.RESTORE_COMPLETED
                             else LauncherAppWidgetInfo.FLAG_UI_NOT_READY
                     }
                     update = true
                 }
             } else if (
-                (item.hasRestoreFlag(LauncherAppWidgetInfo.FLAG_UI_NOT_READY) &&
-                    (appWidgetInfo.configure == null))
+                item.hasRestoreFlag(LauncherAppWidgetInfo.FLAG_UI_NOT_READY) &&
+                    (!WidgetAddFlowHandler(appWidgetInfo).needsConfigure() ||
+                        widgetHelper.isAppWidgetRestored(item.appWidgetId))
             ) {
-                // The widget was marked as UI not ready, but there is no configure activity to
-                // update the UI.
                 item.restoreStatus = LauncherAppWidgetInfo.RESTORE_COMPLETED
                 update = true
-            } else if (
-                (item.hasRestoreFlag(LauncherAppWidgetInfo.FLAG_UI_NOT_READY) &&
-                    appWidgetInfo.configure != null)
-            ) {
-                if (widgetHelper.isAppWidgetRestored(item.appWidgetId)) {
-                    item.restoreStatus = LauncherAppWidgetInfo.RESTORE_COMPLETED
-                    update = true
-                }
             }
         }
 
